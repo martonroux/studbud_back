@@ -28,7 +28,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load config:\n%w", err)
 	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -41,20 +40,27 @@ func run() error {
 	if err := db_sql.SetupAll(ctx, d.db); err != nil {
 		return fmt.Errorf("setup schema:\n%w", err)
 	}
-
 	d.scheduler.Start(ctx)
 
-	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           buildRouter(d),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
+	srv := newServer(cfg, d)
 	go serve(srv, cfg.Port)
 
 	<-ctx.Done()
 	log.Print("shutting down")
+	return shutdown(srv)
+}
 
+// newServer builds the http.Server with the wired router and safe header timeout.
+func newServer(cfg *config.Config, d *deps) *http.Server {
+	return &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           buildRouter(d),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+}
+
+// shutdown performs the graceful shutdown with a bounded timeout.
+func shutdown(srv *http.Server) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
