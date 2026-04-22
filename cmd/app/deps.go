@@ -38,41 +38,41 @@ import (
 
 // deps bundles every constructed service and shared resource for the router.
 type deps struct {
-	cfg           *config.Config            // cfg is the loaded runtime configuration
-	db            *pgxpool.Pool             // db is the shared PostgreSQL connection pool
-	signer        *jwtsigner.Signer         // signer issues and verifies JWTs
-	scheduler     *cron.Scheduler           // scheduler drives periodic background jobs
-	worker        *keywordWorker.Worker     // worker processes keyword extraction tasks
-	access        *access.Service           // access gates subject/chapter entitlements
-	user          *user.Service             // user handles registration, login, and profiles
-	emailVer      *emailverification.Service // emailVer manages email verification flows
-	image         *image.Service            // image manages uploads and retrieval
-	subject       *subject.Service          // subject owns study subject CRUD
-	chapter       *chapter.Service          // chapter owns chapter CRUD within subjects
-	flashcard     *flashcard.Service        // flashcard owns card CRUD within chapters
-	search        *search.Service           // search provides full-text search
-	friendship    *friendship.Service       // friendship manages friend requests and lists
-	subjectSub    *subjectsub.Service       // subjectSub handles subject subscriptions
-	collab        *collaboration.Service    // collab manages collaborative editing sessions
-	preferences   *preferences.Service      // preferences stores per-user settings
-	gamification  *gamification.Service     // gamification tracks badges and XP
-	ai            *aipipeline.Service       // ai provides AI pipeline stubs
-	quiz          *quiz.Service             // quiz provides quiz generation stubs
-	plan          *pkgplan.Service          // plan provides study plan stubs
-	duel          *duel.Service             // duel handles real-time duel sessions
-	billing       *pkgbilling.Service       // billing manages subscription and payments
+	cfg          *config.Config             // cfg is the loaded runtime configuration
+	db           *pgxpool.Pool              // db is the shared PostgreSQL connection pool
+	signer       *jwtsigner.Signer          // signer issues and verifies JWTs
+	scheduler    *cron.Scheduler            // scheduler drives periodic background jobs
+	worker       *keywordWorker.Worker      // worker processes keyword extraction tasks
+	access       *access.Service            // access gates subject/chapter entitlements
+	user         *user.Service              // user handles registration, login, and profiles
+	emailVer     *emailverification.Service // emailVer manages email verification flows
+	image        *image.Service             // image manages uploads and retrieval
+	subject      *subject.Service           // subject owns study subject CRUD
+	chapter      *chapter.Service           // chapter owns chapter CRUD within subjects
+	flashcard    *flashcard.Service         // flashcard owns card CRUD within chapters
+	search       *search.Service            // search provides full-text search
+	friendship   *friendship.Service        // friendship manages friend requests and lists
+	subjectSub   *subjectsub.Service        // subjectSub handles subject subscriptions
+	collab       *collaboration.Service     // collab manages collaborative editing sessions
+	preferences  *preferences.Service       // preferences stores per-user settings
+	gamification *gamification.Service      // gamification tracks badges and XP
+	ai           *aipipeline.Service        // ai provides AI pipeline stubs
+	quiz         *quiz.Service              // quiz provides quiz generation stubs
+	plan         *pkgplan.Service           // plan provides study plan stubs
+	duel         *duel.Service              // duel handles real-time duel sessions
+	billing      *pkgbilling.Service        // billing manages subscription and payments
 }
 
 // infra groups infrastructure-level singletons built before domain services.
 type infra struct {
-	signer     *jwtsigner.Signer       // signer is the JWT signer
-	store      *storage.FileStore      // store is the filesystem image store
-	emailer    email.Sender            // emailer sends transactional email
-	scheduler  *cron.Scheduler         // scheduler drives cron jobs
-	worker     *keywordWorker.Worker   // worker processes keyword tasks
-	aiClient   aiProvider.Client       // aiClient wraps the AI provider
-	billing    billingadapter.Client   // billing wraps the payment provider
-	hub        *duelHub.Hub            // hub manages active duel websocket sessions
+	signer    *jwtsigner.Signer     // signer is the JWT signer
+	store     *storage.FileStore    // store is the filesystem image store
+	emailer   email.Sender          // emailer sends transactional email
+	scheduler *cron.Scheduler       // scheduler drives cron jobs
+	worker    *keywordWorker.Worker // worker processes keyword tasks
+	aiClient  aiProvider.Client     // aiClient wraps the AI provider
+	billing   billingadapter.Client // billing wraps the payment provider
+	hub       *duelHub.Hub          // hub manages active duel websocket sessions
 }
 
 // buildDeps constructs every service and returns deps plus a cleanup func.
@@ -133,19 +133,19 @@ func buildInfra(cfg *config.Config, pool *pgxpool.Pool) (infra, error) {
 
 // domainSvcs groups all domain-layer services.
 type domainSvcs struct {
-	access       *access.Service
-	user         *user.Service
-	emailVer     *emailverification.Service
-	image        *image.Service
-	subject      *subject.Service
-	chapter      *chapter.Service
-	flashcard    *flashcard.Service
-	search       *search.Service
-	friendship   *friendship.Service
-	subjectSub   *subjectsub.Service
-	collab       *collaboration.Service
-	preferences  *preferences.Service
-	gamification *gamification.Service
+	access       *access.Service            // access gates subject/chapter entitlements
+	user         *user.Service              // user handles registration, login, and profiles
+	emailVer     *emailverification.Service // emailVer manages email verification flows
+	image        *image.Service             // image manages uploads and retrieval
+	subject      *subject.Service           // subject owns study subject CRUD
+	chapter      *chapter.Service           // chapter owns chapter CRUD within subjects
+	flashcard    *flashcard.Service         // flashcard owns card CRUD within chapters
+	search       *search.Service            // search provides full-text search
+	friendship   *friendship.Service        // friendship manages friend requests and lists
+	subjectSub   *subjectsub.Service        // subjectSub handles subject subscriptions
+	collab       *collaboration.Service     // collab manages collaborative editing sessions
+	preferences  *preferences.Service       // preferences stores per-user settings
+	gamification *gamification.Service      // gamification tracks badges and XP
 }
 
 // buildDomainServices constructs all real domain services.
@@ -170,11 +170,11 @@ func buildDomainServices(cfg *config.Config, pool *pgxpool.Pool, inf infra) doma
 
 // stubSvcs groups AI-backed and billing stub services.
 type stubSvcs struct {
-	ai      *aipipeline.Service
-	quiz    *quiz.Service
-	plan    *pkgplan.Service
-	duel    *duel.Service
-	billing *pkgbilling.Service
+	ai      *aipipeline.Service // ai is the AI pipeline stub (Spec A replaces)
+	quiz    *quiz.Service       // quiz is the quiz stub (Spec D replaces)
+	plan    *pkgplan.Service    // plan is the plan stub (Spec B replaces)
+	duel    *duel.Service       // duel is the duel stub (Spec E replaces)
+	billing *pkgbilling.Service // billing is the billing stub (Spec C replaces)
 }
 
 // buildStubServices constructs stub/AI-backed services.
