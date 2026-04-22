@@ -12,6 +12,7 @@ import (
 func TestPreferencesGetCreatesDefault(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
+	testutil.Reset(t, db)
 	svc := preferences.NewService(db)
 	u := testutil.NewVerifiedUser(t, db)
 
@@ -28,6 +29,7 @@ func TestPreferencesGetCreatesDefault(t *testing.T) {
 func TestPreferencesUpdate(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
+	testutil.Reset(t, db)
 	svc := preferences.NewService(db)
 	u := testutil.NewVerifiedUser(t, db)
 
