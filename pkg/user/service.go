@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
@@ -38,7 +39,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (string, int64
 	err = s.db.QueryRow(ctx, qInsertUser, in.Username, strings.ToLower(in.Email), string(hash)).
 		Scan(&id, new(any))
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate") {
+		if sqlstate(err) == "23505" {
 			return "", 0, fmt.Errorf("username or email taken:\n%w", myErrors.ErrConflict)
 		}
 		return "", 0, fmt.Errorf("insert user:\n%w", err)
@@ -148,4 +149,13 @@ func validateRegister(in RegisterInput) error {
 		return fmt.Errorf("password must be at least 8 chars:\n%w", myErrors.ErrValidation)
 	}
 	return nil
+}
+
+// sqlstate returns the Postgres SQLSTATE on err, or "" if err is not a *pgconn.PgError.
+func sqlstate(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
 }

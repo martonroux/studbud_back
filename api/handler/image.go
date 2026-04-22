@@ -21,8 +21,10 @@ func NewImageHandler(svc *image.Service) *ImageHandler {
 }
 
 // Upload handles POST /upload-image (multipart).
+// Hard-caps the request body at 6 MiB to prevent unbounded disk usage from form spillover.
 func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	uid := authctx.UID(r.Context())
+	r.Body = http.MaxBytesReader(w, r.Body, 6<<20)
 	if err := r.ParseMultipartForm(5 << 20); err != nil {
 		httpx.WriteError(w, myErrors.ErrInvalidInput)
 		return
