@@ -86,15 +86,9 @@ func (s *Service) Update(ctx context.Context, uid, id int64, in UpdateInput) (*C
 	if err := s.ensureEdit(ctx, uid, ch.SubjectID); err != nil {
 		return nil, err
 	}
-	title, pos := ch.Title, ch.Position
-	if in.Title != nil {
-		if *in.Title == "" {
-			return nil, myErrors.ErrInvalidInput
-		}
-		title = *in.Title
-	}
-	if in.Position != nil {
-		pos = *in.Position
+	title, pos, err := applyChapterPatch(ch, in)
+	if err != nil {
+		return nil, err
 	}
 	var out Chapter
 	err = s.db.QueryRow(ctx, `
@@ -108,6 +102,22 @@ func (s *Service) Update(ctx context.Context, uid, id int64, in UpdateInput) (*C
 		return nil, fmt.Errorf("update chapter:\n%w", err)
 	}
 	return &out, nil
+}
+
+// applyChapterPatch merges UpdateInput fields onto the existing Chapter values.
+// Returns patched title and position, or ErrInvalidInput for an empty title.
+func applyChapterPatch(ch *Chapter, in UpdateInput) (title string, pos int, err error) {
+	title, pos = ch.Title, ch.Position
+	if in.Title != nil {
+		if *in.Title == "" {
+			return "", 0, myErrors.ErrInvalidInput
+		}
+		title = *in.Title
+	}
+	if in.Position != nil {
+		pos = *in.Position
+	}
+	return title, pos, nil
 }
 
 // Delete removes a chapter; caller must have edit rights on its subject.

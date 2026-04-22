@@ -93,35 +93,9 @@ func (s *Service) Update(ctx context.Context, uid, subjectID int64, in UpdateInp
 	if sub.OwnerID != uid {
 		return nil, myErrors.ErrForbidden
 	}
-	name, color, icon, tags, vis, desc := sub.Name, sub.Color, sub.Icon, sub.Tags, sub.Visibility, sub.Description
-	archived := sub.Archived
-	if in.Name != nil {
-		if *in.Name == "" {
-			return nil, myErrors.ErrInvalidInput
-		}
-		name = *in.Name
-	}
-	if in.Color != nil {
-		color = *in.Color
-	}
-	if in.Icon != nil {
-		icon = *in.Icon
-	}
-	if in.Tags != nil {
-		tags = *in.Tags
-	}
-	if in.Visibility != nil {
-		v := *in.Visibility
-		if v != "private" && v != "friends" && v != "public" {
-			return nil, myErrors.ErrInvalidInput
-		}
-		vis = v
-	}
-	if in.Description != nil {
-		desc = *in.Description
-	}
-	if in.Archived != nil {
-		archived = *in.Archived
+	name, color, icon, tags, vis, desc, archived, err := applySubjectPatch(sub, in)
+	if err != nil {
+		return nil, err
 	}
 	var out Subject
 	err = s.db.QueryRow(ctx, `
@@ -140,6 +114,42 @@ func (s *Service) Update(ctx context.Context, uid, subjectID int64, in UpdateInp
 		return nil, fmt.Errorf("update subject:\n%w", err)
 	}
 	return &out, nil
+}
+
+// applySubjectPatch merges UpdateInput fields onto the existing Subject values.
+// Returns the patched field values or ErrInvalidInput for constraint violations.
+func applySubjectPatch(sub *Subject, in UpdateInput) (name, color, icon, tags, vis, desc string, archived bool, err error) {
+	name, color, icon = sub.Name, sub.Color, sub.Icon
+	tags, vis, desc, archived = sub.Tags, sub.Visibility, sub.Description, sub.Archived
+	if in.Name != nil {
+		if *in.Name == "" {
+			return "", "", "", "", "", "", false, myErrors.ErrInvalidInput
+		}
+		name = *in.Name
+	}
+	if in.Color != nil {
+		color = *in.Color
+	}
+	if in.Icon != nil {
+		icon = *in.Icon
+	}
+	if in.Tags != nil {
+		tags = *in.Tags
+	}
+	if in.Visibility != nil {
+		v := *in.Visibility
+		if v != "private" && v != "friends" && v != "public" {
+			return "", "", "", "", "", "", false, myErrors.ErrInvalidInput
+		}
+		vis = v
+	}
+	if in.Description != nil {
+		desc = *in.Description
+	}
+	if in.Archived != nil {
+		archived = *in.Archived
+	}
+	return name, color, icon, tags, vis, desc, archived, nil
 }
 
 // Delete removes a subject; requires the caller to be owner.

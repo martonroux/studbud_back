@@ -87,28 +87,9 @@ func (s *Service) Update(ctx context.Context, uid, id int64, in UpdateInput) (*F
 	if err := s.ensureEdit(ctx, uid, fc.SubjectID); err != nil {
 		return nil, err
 	}
-	title, question, answer := fc.Title, fc.Question, fc.Answer
-	chapterID, imageID := fc.ChapterID, fc.ImageID
-	if in.Title != nil {
-		title = *in.Title
-	}
-	if in.Question != nil {
-		if *in.Question == "" {
-			return nil, myErrors.ErrInvalidInput
-		}
-		question = *in.Question
-	}
-	if in.Answer != nil {
-		if *in.Answer == "" {
-			return nil, myErrors.ErrInvalidInput
-		}
-		answer = *in.Answer
-	}
-	if in.ChapterID != nil {
-		chapterID = in.ChapterID
-	}
-	if in.ImageID != nil {
-		imageID = in.ImageID
+	title, question, answer, chapterID, imageID, err := applyFlashcardPatch(fc, in)
+	if err != nil {
+		return nil, err
 	}
 	var out Flashcard
 	err = s.db.QueryRow(ctx, `
@@ -126,6 +107,35 @@ func (s *Service) Update(ctx context.Context, uid, id int64, in UpdateInput) (*F
 		return nil, fmt.Errorf("update flashcard:\n%w", err)
 	}
 	return &out, nil
+}
+
+// applyFlashcardPatch merges UpdateInput fields onto the existing Flashcard values.
+// Returns patched field values or ErrInvalidInput for empty question/answer.
+func applyFlashcardPatch(fc *Flashcard, in UpdateInput) (title, question, answer string, chapterID *int64, imageID *string, err error) {
+	title, question, answer = fc.Title, fc.Question, fc.Answer
+	chapterID, imageID = fc.ChapterID, fc.ImageID
+	if in.Title != nil {
+		title = *in.Title
+	}
+	if in.Question != nil {
+		if *in.Question == "" {
+			return "", "", "", nil, nil, myErrors.ErrInvalidInput
+		}
+		question = *in.Question
+	}
+	if in.Answer != nil {
+		if *in.Answer == "" {
+			return "", "", "", nil, nil, myErrors.ErrInvalidInput
+		}
+		answer = *in.Answer
+	}
+	if in.ChapterID != nil {
+		chapterID = in.ChapterID
+	}
+	if in.ImageID != nil {
+		imageID = in.ImageID
+	}
+	return title, question, answer, chapterID, imageID, nil
 }
 
 // Delete removes a flashcard.

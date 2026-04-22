@@ -51,23 +51,9 @@ func (s *Service) Issue(ctx context.Context, uid int64, recipient string) error 
 
 // Verify consumes a token and flips users.email_verified.
 func (s *Service) Verify(ctx context.Context, token string) error {
-	var uid int64
-	var expires time.Time
-	var used *time.Time
-	err := s.db.QueryRow(ctx, `
-        SELECT user_id, expires_at, used_at FROM email_verifications WHERE token = $1
-    `, token).Scan(&uid, &expires, &used)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("unknown token:\n%w", myErrors.ErrNotFound)
-	}
+	uid, err := s.lookupToken(ctx, token)
 	if err != nil {
-		return fmt.Errorf("load token:\n%w", err)
-	}
-	if used != nil {
-		return fmt.Errorf("token already used:\n%w", myErrors.ErrAlreadyVerified)
-	}
-	if time.Now().After(expires) {
-		return fmt.Errorf("token expired:\n%w", myErrors.ErrValidation)
+		return err
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -83,6 +69,29 @@ func (s *Service) Verify(ctx context.Context, token string) error {
 		return fmt.Errorf("mark token used:\n%w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// lookupToken fetches the user_id for a token and validates it is unused and unexpired.
+func (s *Service) lookupToken(ctx context.Context, token string) (int64, error) {
+	var uid int64
+	var expires time.Time
+	var used *time.Time
+	err := s.db.QueryRow(ctx, `
+        SELECT user_id, expires_at, used_at FROM email_verifications WHERE token = $1
+    `, token).Scan(&uid, &expires, &used)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("unknown token:\n%w", myErrors.ErrNotFound)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load token:\n%w", err)
+	}
+	if used != nil {
+		return 0, fmt.Errorf("token already used:\n%w", myErrors.ErrAlreadyVerified)
+	}
+	if time.Now().After(expires) {
+		return 0, fmt.Errorf("token expired:\n%w", myErrors.ErrValidation)
+	}
+	return uid, nil
 }
 
 func (s *Service) checkThrottle(ctx context.Context, uid int64) error {

@@ -41,7 +41,21 @@ type Config struct {
 // Load reads environment variables, validates them, and returns a Config.
 // Returns an error describing the first validation failure.
 func Load() (*Config, error) {
-	cfg := &Config{
+	cfg := loadFromEnv()
+	ttl, err := parseTTL(getEnvDefault("JWT_TTL", "720h"))
+	if err != nil {
+		return nil, fmt.Errorf("parse JWT_TTL:\n%w", err)
+	}
+	cfg.JWTTTL = ttl
+	if err := validate(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// loadFromEnv reads all environment variables into a Config struct (no validation).
+func loadFromEnv() *Config {
+	return &Config{
 		Port:        getEnvDefault("PORT", "8080"),
 		Env:         getEnvDefault("ENV", "dev"),
 		FrontendURL: os.Getenv("FRONTEND_URL"),
@@ -69,17 +83,6 @@ func Load() (*Config, error) {
 
 		AdminBootstrapEmail: os.Getenv("ADMIN_BOOTSTRAP_EMAIL"),
 	}
-
-	ttl, err := parseTTL(getEnvDefault("JWT_TTL", "720h"))
-	if err != nil {
-		return nil, fmt.Errorf("parse JWT_TTL:\n%w", err)
-	}
-	cfg.JWTTTL = ttl
-
-	if err := validate(cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
 }
 
 // getEnvDefault returns the value of key if set and non-empty, else fallback.

@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -13,7 +14,7 @@ func DecodeJSON(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		return fmt.Errorf("decode json: %w:\n%w", myErrors.ErrInvalidInput, err)
+		return fmt.Errorf("decode json:\n%w", errors.Join(myErrors.ErrInvalidInput, err))
 	}
 	return nil
 }
