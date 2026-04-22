@@ -1,0 +1,17 @@
+# Go
+*.test
+*.out
+/bin/
+
+# Env
+.env
+.env.local
+
+# Uploads (keep directory, ignore contents)
+uploads/*
+!uploads/.keep
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
