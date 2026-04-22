@@ -1,8 +1,8 @@
-# Study Buddy API Documentation
+# StudBud API Documentation
 
-**Base URL:** `http://localhost:8080`
-**Version:** 2.0
-**Description:** A REST API for managing study flashcards, subjects, and chapters with sharing, collaboration, and social features.
+**Base URL:** `http://localhost:8080` (default; set via `PORT` env var)
+**Version:** Skeleton 1.0 (matches `cmd/app/routes.go`)
+**Scope:** This document describes the routes that are actually wired in the current skeleton. Routes that belong to Spec A (AI), Spec B (study plans), Spec D (quizzes), Spec E (duels), or Spec C (billing) are registered as stubs and return `501 Not Implemented` until their respective specs ship.
 
 ---
 
@@ -10,263 +10,277 @@
 
 - [Authentication](#authentication)
 - [Error Responses](#error-responses)
+- [Access Model](#access-model)
 - [Data Models](#data-models)
+- [Route Index](#route-index)
+- [Public Endpoints](#public-endpoints)
 - [User Endpoints](#user-endpoints)
 - [Email Verification Endpoints](#email-verification-endpoints)
 - [Image Endpoints](#image-endpoints)
 - [Subject Endpoints](#subject-endpoints)
 - [Chapter Endpoints](#chapter-endpoints)
-- [FlashCard Endpoints](#flashcard-endpoints)
+- [Flashcard Endpoints](#flashcard-endpoints)
 - [Search Endpoints](#search-endpoints)
 - [Friendship Endpoints](#friendship-endpoints)
 - [Subscription Endpoints](#subscription-endpoints)
 - [Collaboration Endpoints](#collaboration-endpoints)
 - [Preferences Endpoints](#preferences-endpoints)
 - [Gamification Endpoints](#gamification-endpoints)
-- [Backend File Structure](#backend-file-structure)
+- [Billing Endpoints (stub)](#billing-endpoints-stub)
+- [AI Endpoints (stub)](#ai-endpoints-stub)
+- [Quiz Endpoints (stub)](#quiz-endpoints-stub)
+- [Plan Endpoints (stub)](#plan-endpoints-stub)
+- [Duel Endpoints (stub)](#duel-endpoints-stub)
 
 ---
 
 ## Authentication
 
-Most endpoints require a valid JWT token passed in the `Authorization` header.
+Most endpoints require a valid JWT token in the `Authorization` header.
 
-**Header format:**
 ```
 Authorization: Bearer <token>
 ```
 
 **Token details:**
 - Algorithm: HS256
-- Expiration: 72 hours from issuance
-- Claims: `user_id`, `username`, `email_verified`, `exp`
+- Issuer: `JWT_ISSUER` env var (default `studbud`)
+- Expiration: `JWT_TTL` env var (default `720h` — 30 days)
+- Claims: `sub` (user id), `email_verified`, `is_admin`, `iss`, `exp`, `iat`
 
-Tokens are obtained via `/user-register` or `/user-login`.
+Tokens are obtained via `POST /user-register` or `POST /user-login`.
 
-**Email verification enforcement:**
-Most protected endpoints require `email_verified: true` in the JWT. Unverified users receive `403 Forbidden` on all routes except `/user-test-jwt` and `/resend-verification`. After verifying email, the user must re-login to get a new token with `email_verified: true`.
+**Email-verification gate.** A second middleware (`RequireVerified`) sits in front of most mutating routes and rejects any token with `email_verified: false`. After verifying, the user must **re-login** to obtain a fresh JWT — the token is not refreshed server-side. The two escape-hatch routes for unverified users are `POST /user-test-jwt` and `POST /resend-verification`.
 
 ---
 
 ## Error Responses
 
-All errors follow the same format:
+All handler errors flow through `httpx.WriteError` and serialize to a single JSON envelope:
 
 ```json
 {
-  "message": "Description of the error"
+  "error": {
+    "code": "string",
+    "message": "string"
+  }
 }
 ```
 
-| Status Code | Meaning |
-|-------------|---------|
-| 400 | Bad Request — invalid input or missing required fields |
-| 401 | Unauthorized — missing or invalid JWT token |
-| 403 | Forbidden — email not verified, or insufficient permissions |
-| 404 | Not Found — resource does not exist or user has no access |
-| 500 | Internal Server Error — database or server-side failure |
+| Status | Code                  | Typical cause                                            |
+|--------|-----------------------|----------------------------------------------------------|
+| 400    | `invalid_input`       | Malformed JSON, missing required fields, bad query param |
+| 400    | `validation`          | Business-rule validation (e.g., password too short)      |
+| 401    | `unauthenticated`     | Missing or invalid JWT                                   |
+| 403    | `forbidden`           | Authenticated but not authorized for the resource        |
+| 403    | `email_not_verified`  | JWT present but `email_verified: false`                  |
+| 403    | `already_verified`    | Resend attempted on a verified account                   |
+| 404    | `not_found`           | Resource does not exist or user has no access            |
+| 409    | `conflict`            | Duplicate (e.g., username/email taken)                   |
+| 500    | `internal_error`      | Database or server-side failure                          |
+| 501    | `not_implemented`     | Stub endpoint; feature pending its spec                  |
+
+A panic in any handler is caught by the `Recoverer` middleware and returned as `500 internal_error` in the same envelope.
+
+---
+
+## Access Model
+
+Subjects have 3-level visibility: `private`, `friends`, `public`. Access to a subject's resources (chapters, flashcards) is resolved in this order:
+
+| Level        | How granted                                                                    |
+|--------------|--------------------------------------------------------------------------------|
+| **owner**    | User created the subject                                                       |
+| **editor**   | Added as collaborator with `role: "editor"`, or redeemed an editor invite      |
+| **viewer**   | Added as collaborator with `role: "viewer"`; friend of owner (`friends` vis.); subscriber (`public` vis.); redeemed a viewer invite |
+| **none**     | No relationship                                                                |
+
+**Minimum access per operation:**
+
+| Operation                                                   | Minimum |
+|-------------------------------------------------------------|---------|
+| Read subject / chapters / flashcards                        | viewer  |
+| Create / update / delete chapters and flashcards            | editor  |
+| Record a flashcard review (`/flashcard-review`)             | viewer  |
+| Update / delete subject; manage collaborators / invites     | owner   |
 
 ---
 
 ## Data Models
 
+All Go models are located under `pkg/<domain>/model.go`. Unless noted, JSON field names are **snake_case** matching the struct tags.
+
 ### User
 ```json
 {
-  "id": "abcd_efgh",
-  "username": "string",
-  "email": "user@example.com",
-  "emailVerified": true,
-  "profilePicture": "http://localhost:8080/images/abcd_efgh",
-  "createdAt": "2024-01-01T00:00:00Z"
+  "ID": 1,
+  "Username": "alice",
+  "Email": "alice@example.com",
+  "EmailVerified": true,
+  "CreatedAt": "2026-04-22T10:00:00Z",
+  "IsAdmin": false
 }
 ```
+
+The `user.User` struct has no JSON tags — field names are serialized verbatim (PascalCase). This struct is currently only used internally for auth bookkeeping; no handler returns it directly.
 
 ### Subject
 ```json
 {
   "id": 1,
-  "name": "string",
-  "color": "string",
-  "icon": "📚",
-  "tags": "string",
-  "lastUsed": "2024-01-01T00:00:00Z",
-  "graphId": 1,
-  "archived": false,
+  "owner_id": 7,
+  "name": "Organic Chemistry",
+  "color": "#3B82F6",
+  "icon": "⚗️",
+  "tags": "chem science",
   "visibility": "private",
-  "flashcardCount": 12,
-  "accessLevel": "owner",
-  "ownerUsername": "alice"
+  "archived": false,
+  "description": "Second-semester organic chemistry",
+  "last_used": "2026-04-21T18:04:00Z",
+  "created_at": "2026-01-10T12:00:00Z",
+  "updated_at": "2026-04-21T18:04:00Z"
 }
 ```
 
-| Field | Notes |
-|-------|-------|
-| `icon` | Optional emoji or short glyph (max 16 chars). Used by the frontend to render a subject icon. Omitted when unset |
-| `visibility` | `"private"`, `"friends"`, or `"public"`. Default: `"private"` |
-| `flashcardCount` | Total number of flashcards in the subject. Computed at query time |
-| `accessLevel` | Present on shared subjects: `"owner"`, `"editor"`, `"viewer"`. Omitted when empty |
-| `ownerUsername` | Present on shared/collaborated/subscribed subjects. Omitted when empty |
+| Field        | Notes                                                          |
+|--------------|----------------------------------------------------------------|
+| `visibility` | `"private"`, `"friends"`, or `"public"`. Default `"private"`   |
+| `archived`   | Archived subjects are excluded from list responses unless `?archived=true` |
+| `last_used`  | Nullable; set by gamification when a training session is recorded |
 
 ### Chapter
 ```json
 {
   "id": 1,
-  "title": "string",
-  "subjectId": 1,
-  "flashcardCount": 5
+  "subject_id": 7,
+  "title": "Alkenes",
+  "position": 2,
+  "created_at": "2026-01-10T12:00:00Z",
+  "updated_at": "2026-01-10T12:00:00Z"
 }
 ```
 
-| Field | Notes |
-|-------|-------|
-| `flashcardCount` | Number of flashcards in the chapter. Computed at query time on list/search endpoints; `0` on create/update responses |
-
-### FlashCard
-
+### Flashcard
 ```json
 {
   "id": 1,
-  "title": "string",
-  "question": "string",
-  "answer": "string",
-  "lastResult": -1,
-  "lastUsed": "2024-01-01T00:00:00Z",
-  "subjectId": 1,
-  "chapterId": 1
+  "subject_id": 7,
+  "chapter_id": 3,
+  "title": "",
+  "question": "What is E2 elimination?",
+  "answer": "Concerted, anti-periplanar, strong base.",
+  "image_id": null,
+  "source": "manual",
+  "due_at": "2026-04-23T00:00:00Z",
+  "last_result": 2,
+  "last_used": "2026-04-22T08:12:00Z",
+  "created_at": "2026-04-01T00:00:00Z",
+  "updated_at": "2026-04-22T08:12:00Z"
 }
 ```
 
-`chapterId` is nullable. When `null`, the flashcard belongs directly to the subject without chapter grouping.
-
-**`lastResult` values:**
-
-| Value | Meaning |
-|-------|---------|
-| -1 | Not yet reviewed |
-| 0 | Incorrect |
-| 1 | Partial / Uncertain |
-| 2 | Correct / Mastered |
+| Field          | Notes                                                                 |
+|----------------|-----------------------------------------------------------------------|
+| `chapter_id`   | Nullable — when `null`, the card lives at the subject root            |
+| `source`       | `"manual"` (default) or `"ai"`                                        |
+| `image_id`     | Nullable; when set, points to an image served from `GET /images/{id}` |
+| `last_result`  | `-1` never reviewed, `0` bad, `1` ok, `2` good                        |
+| `due_at`       | Nullable; reserved for future SRS scheduling                          |
 
 ### Friendship
 ```json
 {
   "id": 1,
-  "senderId": 1,
-  "receiverId": 2,
+  "sender_id": 7,
+  "receiver_id": 12,
   "status": "pending",
-  "createdAt": "2024-01-01T00:00:00Z"
+  "created_at": "2026-04-20T09:00:00Z",
+  "updated_at": "2026-04-20T09:00:00Z"
 }
 ```
 
-`status` is one of: `"pending"`, `"accepted"`, `"declined"`.
+`status` is one of `"pending"`, `"accepted"`, `"declined"`.
 
 ### Collaborator
 ```json
 {
   "id": 1,
-  "subjectId": 1,
-  "userId": 2,
-  "username": "bob",
+  "subject_id": 7,
+  "user_id": 12,
   "role": "editor",
-  "createdAt": "2024-01-01T00:00:00Z"
+  "created_at": "2026-04-20T09:00:00Z"
 }
 ```
-
-`role` is `"editor"` or `"viewer"`.
 
 ### InviteLink
 ```json
 {
-  "id": 1,
-  "subjectId": 1,
-  "token": "abc123def456...",
+  "token": "9f2c8b1e3a...",
+  "subject_id": 7,
   "role": "editor",
-  "createdBy": 1,
-  "expiresAt": "2025-12-31T23:59:59Z",
-  "createdAt": "2024-01-01T00:00:00Z"
+  "expires_at": "2026-05-20T09:00:00Z",
+  "created_at": "2026-04-20T09:00:00Z"
 }
 ```
 
-`expiresAt` is nullable — `null` means the link never expires.
+`expires_at` is nullable — `null` means the invite never expires.
 
-### Image
+### Streak
 ```json
 {
-  "id": "abcd_efgh",
-  "url": "http://localhost:8080/images/abcd_efgh"
+  "user_id": 7,
+  "current_streak": 4,
+  "longest_streak": 11,
+  "last_day": "2026-04-22T00:00:00Z",
+  "updated_at": "2026-04-22T18:30:00Z"
 }
 ```
 
-Returned from the upload endpoint. Images are served publicly via `GET /images/{id}`.
-
-### Error Response
+### DailyGoal
 ```json
 {
-  "message": "string"
+  "user_id": 7,
+  "day": "2026-04-22T00:00:00Z",
+  "done_today": 8,
+  "target": 20
+}
+```
+
+### TrainingSession
+```json
+{
+  "id": 42,
+  "user_id": 7,
+  "subject_id": 1,
+  "card_count": 18,
+  "duration_ms": 274000,
+  "score": 80,
+  "created_at": "2026-04-22T18:30:00Z"
 }
 ```
 
 ### Achievement
 ```json
 {
-  "id": "centurion",
-  "title": "Centurion",
-  "description": "Master 100 flashcards.",
-  "icon": "🏆",
-  "category": "mastery",
-  "target": 100
+  "code": "first_session",
+  "title": "First Session",
+  "description": "Complete your first training session.",
+  "unlocked_at": "2026-04-22T18:30:00Z"
 }
 ```
 
-| Field | Notes |
-|-------|-------|
-| `id` | Stable string identifier (e.g. `"first-steps"`, `"centurion"`). Catalogue is server-defined |
-| `category` | `"mastery"`, `"streak"`, `"volume"`, or `"exploration"` |
-| `target` | Numeric threshold the user must reach to unlock. Unit depends on category |
-| `icon` | Emoji or short glyph used in the UI |
+`unlocked_at` is `null` for locked achievements returned from `GET /achievements`.
 
-### UnlockedAchievement
+### Preferences (`Prefs`)
 ```json
 {
-  "id": "centurion",
-  "unlockedAt": "2024-04-15T18:23:11Z"
+  "user_id": 7,
+  "ai_planning_enabled": false,
+  "daily_goal_target": 20
 }
 ```
 
-Represents a single unlock record for the authenticated user. Response payloads that combine the catalogue with progress merge this with the matching [Achievement](#achievement).
-
-### StreakState
-```json
-{
-  "currentDays": 4,
-  "bestDays": 11,
-  "lastStudiedDate": "2024-04-16"
-}
-```
-
-| Field | Notes |
-|-------|-------|
-| `currentDays` | Current consecutive-day streak |
-| `bestDays` | All-time highest consecutive-day streak |
-| `lastStudiedDate` | `YYYY-MM-DD` of the last day that counted toward the streak. `null` if the user has never trained |
-
-### DailyGoal
-```json
-{
-  "target": 20,
-  "doneToday": 8,
-  "date": "2024-04-17"
-}
-```
-
-| Field | Notes |
-|-------|-------|
-| `target` | Number of cards the user aims to review per day. Default: `20` |
-| `doneToday` | Number of cards reviewed on `date` |
-| `date` | `YYYY-MM-DD` the counter is scoped to. The server resets `doneToday` to `0` when the user's local day rolls over |
-
-### UserStats
+### UserStats (from `/get-user-stats`)
 ```json
 {
   "masteryPercent": 0.62,
@@ -281,1763 +295,622 @@ Represents a single unlock record for the authenticated user. Response payloads 
 }
 ```
 
-| Field | Notes |
-|-------|-------|
-| `masteryPercent` | Float in `[0, 1]`. Computed as `(good + ok * 0.5) / total` across all cards the user owns |
-| `cardsStudied` | Count of cards with `lastResult != -1` |
-| `totalCards` | Total cards in the user's owned subjects |
-| `goodCount` / `okCount` / `badCount` / `newCount` | Breakdown matching [FlashCard](#flashcard) `lastResult` values |
-| `badgesUnlocked` / `badgesTotal` | Achievement progress summary |
+Note: this endpoint uses **camelCase**; the gamification `UserStats` payload at `GET /user-stats` uses a different schema (see that endpoint).
 
-### Preferences
+### Image
 ```json
-{
-  "aiPlanningEnabled": false,
-  "dailyGoalTarget": 20
-}
+{ "id": "abcd_efgh", "url": "/images/abcd_efgh" }
 ```
 
-| Field | Notes |
-|-------|-------|
-| `aiPlanningEnabled` | Opt-in toggle for AI-driven study planning. Drives whether the frontend shows streak/daily-goal UI. Default: `false` |
-| `dailyGoalTarget` | Preferred daily review target. Mirrors [DailyGoal](#dailygoal).`target` and is used to seed it when the AI toggle is first enabled |
+Returned from `POST /upload-image`. Images are served publicly via `GET /images/{id}`.
 
-### TrainingSession
+### TokenResponse
 ```json
-{
-  "id": 42,
-  "subjectId": 1,
-  "goods": 12,
-  "oks": 4,
-  "bads": 2,
-  "totalCards": 18,
-  "completedAt": "2024-04-17T10:31:00Z"
-}
+{ "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
 ```
-
-Represents a completed training session. Returned from [`POST /record-training-session`](#record-a-training-session) and used server-side to update streak, daily goal, and achievements.
 
 ---
 
-## Access Model
+## Route Index
 
-Subjects have a 3-level visibility: `private`, `friends`, `public`. Access is resolved in this order:
+| # | Method | Path                              | Access        |
+|---|--------|-----------------------------------|---------------|
+| **Public** |
+|   | POST   | `/user-register`                  | public        |
+|   | POST   | `/user-login`                     | public        |
+|   | GET    | `/verify-email`                   | public        |
+|   | GET    | `/images/{id}`                    | public        |
+|   | POST   | `/billing/webhook`                | public (stub) |
+| **Auth only** |
+|   | POST   | `/user-test-jwt`                  | auth          |
+|   | POST   | `/resend-verification`            | auth          |
+|   | GET    | `/subject-list`                   | auth          |
+|   | GET    | `/subject`                        | auth          |
+|   | GET    | `/chapter-list`                   | auth          |
+|   | GET    | `/flashcard-list`                 | auth          |
+|   | GET    | `/flashcard`                      | auth          |
+|   | POST   | `/flashcard-review`               | auth          |
+|   | GET    | `/search/subjects`                | auth          |
+|   | GET    | `/search/users`                   | auth          |
+|   | POST   | `/friendship-accept`              | auth          |
+|   | POST   | `/friendship-decline`             | auth          |
+|   | POST   | `/friendship-unfriend`            | auth          |
+|   | GET    | `/friendship-list`                | auth          |
+|   | GET    | `/friendship-pending`             | auth          |
+|   | POST   | `/subject-subscribe`              | auth          |
+|   | POST   | `/subject-unsubscribe`            | auth          |
+|   | GET    | `/subject-subscriptions`          | auth          |
+|   | GET    | `/collaborators`                  | auth          |
+|   | GET    | `/preferences`                    | auth          |
+|   | POST   | `/preferences-update`             | auth          |
+|   | GET    | `/gamification-state`             | auth          |
+|   | POST   | `/training-session-record`        | auth          |
+|   | GET    | `/user-stats`                     | auth          |
+|   | GET    | `/achievements`                   | auth          |
+|   | POST   | `/billing/checkout`               | auth (stub)   |
+|   | POST   | `/billing/portal`                 | auth (stub)   |
+| **Auth + verified** |
+|   | POST   | `/set-profile-picture`            | verified      |
+|   | GET    | `/get-user-stats`                 | verified      |
+|   | POST   | `/upload-image`                   | verified      |
+|   | POST   | `/delete-image`                   | verified      |
+|   | POST   | `/subject-create`                 | verified      |
+|   | POST   | `/subject-update`                 | verified      |
+|   | POST   | `/subject-delete`                 | verified      |
+|   | POST   | `/chapter-create`                 | verified      |
+|   | POST   | `/chapter-update`                 | verified      |
+|   | POST   | `/chapter-delete`                 | verified      |
+|   | POST   | `/flashcard-create`               | verified      |
+|   | POST   | `/flashcard-update`               | verified      |
+|   | POST   | `/flashcard-delete`               | verified      |
+|   | POST   | `/friendship-request`             | verified      |
+|   | POST   | `/collaborators`                  | verified      |
+|   | POST   | `/collaborator-remove`            | verified      |
+|   | POST   | `/collaboration-invites`          | verified      |
+|   | POST   | `/collaboration-invite-redeem`    | verified      |
+| **Stubs (501 Not Implemented)** |
+|   | POST   | `/ai/flashcards/prompt`           | verified      |
+|   | POST   | `/ai/flashcards/pdf`              | verified      |
+|   | POST   | `/ai/check`                       | verified      |
+|   | POST   | `/quiz/generate`                  | verified      |
+|   | POST   | `/quiz/attempt`                   | verified      |
+|   | POST   | `/quiz/share`                     | verified      |
+|   | POST   | `/plan/generate`                  | verified      |
+|   | GET    | `/plan/progress`                  | verified      |
+|   | POST   | `/duel/invite`                    | verified      |
+|   | POST   | `/duel/accept`                    | verified      |
+|   | GET    | `/duel/connect`                   | verified      |
 
-| Level | How granted |
-|-------|-------------|
-| **owner** | User created the subject |
-| **editor** | Added as collaborator with `role: "editor"` |
-| **viewer** | Added as collaborator with `role: "viewer"`, or friend of owner (if `visibility: "friends"`), or subscriber (if `visibility: "public"`) |
-| **none** | No relationship to the subject |
+---
 
-**Access requirements by operation:**
+## Public Endpoints
 
-| Operation | Minimum access |
-|-----------|---------------|
-| Read subject/chapters/flashcards | viewer |
-| Create/update/delete chapters/flashcards | editor |
-| Update/delete subject, manage collaborators/invite links | owner |
-| Copy subject to own library | viewer |
+### Register a new user
+`POST /user-register` — Creates an account, issues a verification email, returns a JWT (with `email_verified: false`).
+
+**Body:**
+```json
+{ "username": "alice", "email": "alice@example.com", "password": "hunter2!!" }
+```
+Password must be ≥ 8 characters. Email must contain `@`. Username and email must both be unique.
+
+**200 Response:** [`TokenResponse`](#tokenresponse)
+
+**Errors:** 400 `invalid_input` / `validation`, 409 `conflict`, 500.
+
+---
+
+### Login
+`POST /user-login` — Authenticates and returns a JWT reflecting the user's current `email_verified` state.
+
+**Body:**
+```json
+{ "identifier": "alice or alice@example.com", "password": "hunter2!!" }
+```
+
+**200 Response:** [`TokenResponse`](#tokenresponse)
+
+**Errors:** 401 `unauthenticated`, 404 `not_found`, 500.
+
+---
+
+### Verify email
+`GET /verify-email?token=<token>` — Consumes a one-shot verification token and flips `users.email_verified`. The user must re-login after this call to get a new JWT.
+
+**200 Response:**
+```json
+{ "message": "email verified successfully" }
+```
+
+**Errors:** 400 `invalid_input`, 400 `validation` (expired), 403 `already_verified` (token already used), 404 `not_found`, 500.
+
+---
+
+### Serve an image
+`GET /images/{id}` — Streams the image bytes. `Content-Type` is sniffed, `Cache-Control: public, max-age=86400`. No authentication — the opaque image id is treated as a capability.
+
+**404** on unknown id.
+
+---
+
+### Billing webhook (stub)
+`POST /billing/webhook` — Stripe webhook landing pad. Reads and discards the body, returns **501 `not_implemented`** until Spec C ships.
 
 ---
 
 ## User Endpoints
 
-### Register a new user
-
-```
-POST /user-register
-```
-
-Creates a new user account and returns a JWT token. A verification email is sent to the provided email address. The returned token has `email_verified: false` — the user must verify their email before accessing most endpoints.
-
-**Authentication:** None
-
-**Request Body:**
-```json
-{
-  "username": "string",
-  "email": "string",
-  "password": "string"
-}
-```
-
-All three fields are required. Email must be a valid format and unique.
-
-**Response `200`:**
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-
-**Error Responses:** `400` (invalid input, duplicate username/email), `500`
-
----
-
-### Login
-
-```
-POST /user-login
-```
-
-Authenticates a user and returns a JWT token. The `identifier` field accepts either a username or email address.
-
-**Authentication:** None
-
-**Request Body:**
-```json
-{
-  "identifier": "string",
-  "password": "string"
-}
-```
-
-| Field | Notes |
-|-------|-------|
-| `identifier` | Username or email address |
-| `password` | Account password |
-
-**Response `200`:**
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-
-**Error Responses:** `400`, `404`, `500`
-
----
-
 ### Validate JWT
+`POST /user-test-jwt` — Returns **201** if the token is valid. No body.
 
-```
-POST /user-test-jwt
-```
-
-Checks whether the stored JWT token is still valid.
-
-**Authentication:** Required
-
-**Request Body:** None
-
-**Response `201`:** No content
-
-**Error Responses:** `401`
+**Errors:** 401.
 
 ---
 
-### Set profile picture
+### Resend verification email
+`POST /resend-verification` — Issues a fresh verification token to the authenticated user. Throttled to 1 request per 60 seconds per user.
 
-```
-POST /set-profile-picture
-```
-
-Sets the authenticated user's profile picture to a previously uploaded image. The image must be owned by the user.
-
-**Authentication:** Required (verified)
-
-**Request Body:**
+**200 Response:**
 ```json
-{
-  "image_id": "string"
-}
+{ "message": "verification email sent" }
 ```
 
-**Response `200`:**
-```json
-{
-  "message": "profile picture updated"
-}
-```
-
-**Error Responses:** `400`, `401`, `403`, `404`
+**Errors:** 400 `validation` (rate-limited), 403 `already_verified`, 500.
 
 ---
 
-### Get user stats
+### Set profile picture (verified)
+`POST /set-profile-picture` — Attaches a previously-uploaded image to the user. The image must be owned by the caller.
 
+**Body:**
+```json
+{ "image_id": "abcd_efgh" }
 ```
-GET /get-user-stats
+
+**200 Response:**
+```json
+{ "message": "profile picture updated" }
 ```
 
-Returns aggregate mastery and achievement progress across the authenticated user's owned subjects. Used by the home and profile screens to render rings and badge counts. Cards from subjects that are only shared with the user (collaborated, subscribed) are **not** included.
+**Errors:** 400, 401, 403, 404.
 
-**Authentication:** Required (verified)
+---
 
-**Response `200`:** [UserStats](#userstats)
+### Get user stats (verified)
+`GET /get-user-stats` — Aggregate mastery + achievement progress across the user's **owned** subjects.
 
-**Error Responses:** `401`, `403`, `500`
+**200 Response:** [`UserStats` (camelCase)](#userstats-from-get-user-stats)
+
+**Errors:** 401, 403, 500.
 
 ---
 
 ## Email Verification Endpoints
 
-### Verify email
-
-```
-GET /verify-email
-```
-
-Verifies a user's email address using the token from the verification email. This is a public endpoint — the user clicks the link from their email without being logged in.
-
-**Authentication:** None
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `token` | string | Yes | Verification token from the email link |
-
-**Response `200`:**
-```json
-{
-  "message": "email verified successfully"
-}
-```
-
-**Error Responses:** `400` (invalid/expired token)
-
----
-
-### Resend verification email
-
-```
-POST /resend-verification
-```
-
-Resends the verification email to the authenticated user. Rate-limited to one request per 60 seconds.
-
-**Authentication:** Required (unverified users allowed)
-
-**Request Body:** None
-
-**Response `200`:**
-```json
-{
-  "message": "verification email sent"
-}
-```
-
-**Error Responses:** `400` (already verified, no email set, rate limited), `401`
+`/verify-email` is listed under [Public Endpoints](#verify-email). `/resend-verification` is listed under [User Endpoints](#resend-verification-email).
 
 ---
 
 ## Image Endpoints
 
-### Upload an image
+### Upload an image (verified)
+`POST /upload-image` — Multipart upload. Body cap: 6 MiB hard limit; form parser cap: 5 MiB.
 
-```
-POST /upload-image
-```
+**Form:** `file` (required, the image)
 
-Uploads an image file. Returns the image ID and public URL. The URL can be embedded in flashcard markdown content as `![](url)`.
-
-**Authentication:** Required (verified)
-
-**Content-Type:** `multipart/form-data`
-
-**Form Fields:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `file` | file | Yes | Image file (max 5MB) |
-| `purpose` | string | No | `"general"`, `"profile_picture"`, or `"flashcard"`. Default: `"general"` |
-
-**Allowed MIME types:** `image/jpeg`, `image/png`, `image/gif`, `image/webp` (detected from file content, not header)
-
-**Response `200`:**
+**200 Response:**
 ```json
-{
-  "id": "abcd_efgh",
-  "url": "http://localhost:8080/images/abcd_efgh"
-}
+{ "id": "abcd_efgh", "url": "/images/abcd_efgh" }
 ```
 
-**Error Responses:** `400` (invalid type, too large), `401`, `403`
+**Errors:** 400 `invalid_input` (missing file, oversize, bad form), 401, 403, 500.
 
 ---
 
-### Serve an image
+### Delete an image (verified)
+`POST /delete-image?id=<image_id>` — Deletes the image row and the underlying file. Caller must own the image.
 
-```
-GET /images/{imageID}
-```
-
-Returns the raw image file. Public endpoint — no authentication required — so images can be loaded in `<img>` tags and markdown renderers.
-
-**Authentication:** None
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `imageID` | string | Yes | Image ID |
-
-**Response `200`:** Raw image bytes with correct `Content-Type` header. Includes `Cache-Control: public, max-age=86400`.
-
-**Error Responses:** `404`
-
----
-
-### Delete an image
-
-```
-POST /delete-image
-```
-
-Deletes an image. Only the image owner can delete it.
-
-**Authentication:** Required (verified)
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | string | Yes | Image ID |
-
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `403`, `404`
+**204 Response.** **Errors:** 400, 401, 403, 404.
 
 ---
 
 ## Subject Endpoints
 
-### Create a subject
+### Create a subject (verified)
+`POST /subject-create`
 
-```
-POST /create-subject
-```
-
-Creates a new subject for the authenticated user. Default visibility is `"private"`.
-
-**Authentication:** Required
-
-**Request Body:**
+**Body:**
 ```json
 {
-  "name": "string",
-  "color": "string",
-  "icon": "📚",
-  "tags": "string"
+  "name": "Organic Chemistry",
+  "color": "#3B82F6",
+  "icon": "⚗️",
+  "tags": "chem science",
+  "visibility": "private",
+  "description": "Second-semester organic chemistry"
 }
 ```
+`name` is required. `visibility` defaults to `"private"` if empty/unset.
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `name` | Yes | Unique per user |
-| `color` | Yes | |
-| `icon` | No | Emoji or short glyph, max 16 chars. Omit or pass empty to leave unset |
-| `tags` | No | Comma-separated |
+**201 Response:** [`Subject`](#subject)
 
-**Response `200`:** [Subject](#subject)
-
-**Error Responses:** `400`, `401`, `500`
+**Errors:** 400 `validation`, 401, 403, 500.
 
 ---
 
-### Update a subject
+### List owned subjects (auth)
+`GET /subject-list[?archived=true]` — Returns subjects the caller owns. Archived subjects are excluded unless `archived=true`.
 
-```
-PUT /update-subject
-```
+**200 Response:** `[Subject]`
 
-Modifies an existing subject's attributes. Only `id` is mandatory; omitted or empty fields are not updated. Owner only.
+---
 
-**Authentication:** Required
+### Get a subject (auth)
+`GET /subject?id=<id>` — Returns the subject if the caller has at least `viewer` access.
 
-**Request Body:**
+**200 Response:** [`Subject`](#subject). **Errors:** 400, 401, 403, 404.
+
+---
+
+### Update a subject (verified)
+`POST /subject-update?id=<id>` — Owner-only. Body is `subject.UpdateInput` — any non-null field is applied.
+
+**Body:**
 ```json
-{
-  "id": "string",
-  "name": "string",
-  "color": "string",
-  "icon": "📚",
-  "tags": "string",
-  "last_used": "2024-01-01T00:00:00Z",
-  "archived": false,
-  "visibility": "private"
-}
+{ "name": "New name", "visibility": "friends", "archived": true }
 ```
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `id` | Yes | ID of the subject to update |
-| `name` | No | |
-| `color` | No | |
-| `icon` | No | Emoji or short glyph, max 16 chars. Pass an empty string to clear |
-| `tags` | No | |
-| `last_used` | No | RFC3339 timestamp |
-| `archived` | No | Boolean, set to `true` to archive or `false` to unarchive |
-| `visibility` | No | `"private"`, `"friends"`, or `"public"` |
-
-**Response `200`:** [Subject](#subject)
-
-**Error Responses:** `400`, `401`, `404`, `500`
+**200 Response:** updated [`Subject`](#subject).
 
 ---
 
-### Remove a subject
+### Delete a subject (verified)
+`POST /subject-delete?id=<id>` — Owner-only cascade delete.
 
-```
-POST /remove-subject
-```
-
-Deletes a subject and all its associated chapters and flashcards. Owner only.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `subject_id` | integer | Yes | ID of the subject to delete |
-
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Get all user subjects
-
-```
-GET /get-subjects-user
-```
-
-Returns all non-archived subjects the authenticated user has access to: owned subjects, collaborated subjects, and subscribed subjects.
-
-**Authentication:** Required
-
-**Response `200`:** Array of [Subject](#subject) (includes `accessLevel` and `ownerUsername` for non-owned subjects)
-
-**Error Responses:** `401`, `500`
-
----
-
-### Get archived subjects
-
-```
-GET /get-archived-subjects
-```
-
-Returns all archived subjects belonging to the authenticated user. Owner-only (no shared subjects).
-
-**Authentication:** Required
-
-**Response `200`:** Array of [Subject](#subject)
-
-**Error Responses:** `401`, `500`
-
----
-
-### Get subject by ID
-
-```
-GET /get-subject
-```
-
-Returns a specific subject by its ID. Accessible to any user with at least viewer access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | integer | Yes | ID of the subject |
-
-**Response `200`:** [Subject](#subject) (includes `accessLevel` and `ownerUsername`)
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Copy a subject
-
-```
-POST /copy-subject
-```
-
-Deep-copies a subject (including chapters and flashcards) into the authenticated user's library. Requires at least viewer access on the source subject. The copy is always `"private"` with all `lastResult` reset to `-1`.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "subject_id": "string"
-}
-```
-
-**Response `200`:** [Subject](#subject) (the new copy)
-
-**Error Responses:** `400`, `401`, `404`, `500`
+**204 Response.**
 
 ---
 
 ## Chapter Endpoints
 
-### Create a chapter
+### Create a chapter (verified)
+`POST /chapter-create`
 
+**Body:**
+```json
+{ "subject_id": 7, "title": "Alkenes" }
 ```
-POST /create-chapter
+
+**201 Response:** [`Chapter`](#chapter)
+
+---
+
+### List chapters in a subject (auth)
+`GET /chapter-list?subject_id=<id>` — Viewer-or-above. Ordered by `position`.
+
+**200 Response:** `[Chapter]`
+
+---
+
+### Update a chapter (verified)
+`POST /chapter-update?id=<id>` — Editor-or-above.
+
+**Body:**
+```json
+{ "title": "New title", "position": 3 }
 ```
 
-Creates a new chapter within a subject. Requires editor access.
+**200 Response:** updated [`Chapter`](#chapter).
 
-**Authentication:** Required
+---
 
-**Request Body:**
+### Delete a chapter (verified)
+`POST /chapter-delete?id=<id>` — Editor-or-above. **204 Response.**
+
+---
+
+## Flashcard Endpoints
+
+### Create a flashcard (verified)
+`POST /flashcard-create`
+
+**Body:**
 ```json
 {
-  "title": "string",
-  "subject_id": "string"
+  "subject_id": 7,
+  "chapter_id": 3,
+  "title": "",
+  "question": "What is E2 elimination?",
+  "answer": "Concerted, anti-periplanar, strong base.",
+  "image_id": null,
+  "source": "manual"
 }
 ```
 
-**Response `200`:** [Chapter](#chapter)
-
-**Error Responses:** `400`, `401`, `404`, `500`
+**201 Response:** [`Flashcard`](#flashcard)
 
 ---
 
-### Update a chapter
+### List flashcards by subject (auth)
+`GET /flashcard-list?subject_id=<id>` — Viewer-or-above.
 
-```
-PUT /update-chapter
-```
+**200 Response:** `[Flashcard]`
 
-Updates a chapter's title. Requires editor access.
+---
 
-**Authentication:** Required
+### Get a flashcard (auth)
+`GET /flashcard?id=<id>` — Viewer-or-above.
 
-**Request Body:**
+**200 Response:** [`Flashcard`](#flashcard)
+
+---
+
+### Update a flashcard (verified)
+`POST /flashcard-update?id=<id>` — Editor-or-above.
+
+**Body:**
 ```json
-{
-  "id": "string",
-  "title": "string"
-}
+{ "chapter_id": 4, "title": null, "question": "Updated?", "answer": "Yes.", "image_id": null }
 ```
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `id` | Yes | ID of the chapter to update |
-| `title` | Yes | New title for the chapter |
-
-**Response `200`:** [Chapter](#chapter)
-
-**Error Responses:** `400`, `401`, `404`, `500`
+**200 Response:** updated [`Flashcard`](#flashcard).
 
 ---
 
-### Remove a chapter
-
-```
-POST /remove-chapter
-```
-
-Deletes a chapter and all flashcards belonging to it. Requires editor access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `chapter_id` | integer | Yes | ID of the chapter to delete |
-
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `404`, `500`
+### Delete a flashcard (verified)
+`POST /flashcard-delete?id=<id>` — Editor-or-above. **204 Response.**
 
 ---
 
-### Get chapters by subject
+### Record a flashcard review (auth)
+`POST /flashcard-review?id=<id>` — Viewer-or-above. Does not advance the streak or daily goal on its own; call `/training-session-record` at the end of the session for gamification state.
 
-```
-GET /get-subject-chapters
-```
-
-Returns all chapters belonging to a subject. Requires viewer access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `subject_id` | integer | Yes | ID of the subject |
-
-**Response `200`:** Array of [Chapter](#chapter)
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-## FlashCard Endpoints
-
-### Create a flashcard
-
-```
-POST /create-flashcard
-```
-
-Creates a new flashcard within a subject, optionally assigned to a chapter. Requires editor access.
-
-**Authentication:** Required
-
-**Request Body:**
+**Body:**
 ```json
-{
-  "title": "string",
-  "question": "string",
-  "answer": "string",
-  "subject_id": "string",
-  "chapter_id": "string"
-}
+{ "result": 2 }
 ```
+`result` is `0` (bad), `1` (ok), or `2` (good).
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `title` | Yes | |
-| `question` | Yes | Supports markdown content |
-| `answer` | Yes | Supports markdown content |
-| `subject_id` | Yes | |
-| `chapter_id` | No | When omitted, flashcard has no chapter. If provided, the chapter must belong to the specified subject |
-
-**Response `200`:** [FlashCard](#flashcard)
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Update a flashcard
-
-```
-PUT /update-flashcard
-```
-
-Updates a flashcard's data. Fields with empty string values are not updated. Requires editor access.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "id": "string",
-  "title": "string",
-  "question": "string",
-  "answer": "string",
-  "subject_id": "string",
-  "chapter_id": "string",
-  "last_result": "string",
-  "last_used": "2024-01-01T00:00:00Z"
-}
-```
-
-| Field | Required | Notes |
-|-------|----------|-------|
-| `id` | Yes | ID of the flashcard to update |
-| `title` | No | |
-| `question` | No | Supports markdown content |
-| `answer` | No | Supports markdown content |
-| `subject_id` | No | |
-| `chapter_id` | No | Omitted or empty string = no change. Explicit `null` = unassign from chapter. If set, the chapter must belong to the flashcard's subject |
-| `last_result` | No | Value from -1 to 2 |
-| `last_used` | No | RFC3339 timestamp |
-
-**Response `200`:** [FlashCard](#flashcard)
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Update flashcard result
-
-```
-PUT /update-flashcard-result
-```
-
-Updates only the `last_result` field of a flashcard. Use this during study sessions to record quiz results. Requires editor access.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "id": "string",
-  "last_result": "string"
-}
-```
-
-| Field | Notes |
-|-------|-------|
-| `last_result` | Value from -1 to 2 |
-
-**Response `200`:** [FlashCard](#flashcard)
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Delete a flashcard
-
-```
-POST /delete-flashcard
-```
-
-Deletes a flashcard by its ID. Requires editor access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | string | Yes | ID of the flashcard to delete |
-
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Get a flashcard
-
-```
-GET /get-flashcard
-```
-
-Returns a single flashcard by its ID. Requires viewer access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | string | Yes | ID of the flashcard |
-
-**Response `200`:** [FlashCard](#flashcard)
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Get flashcard IDs by subject
-
-```
-GET /get-subject-flashcards
-```
-
-Returns all flashcard IDs belonging to a subject. Requires viewer access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | string | Yes | ID of the subject |
-
-**Response `200`:**
-```json
-{
-  "flash_card_ids": [1, 2, 3]
-}
-```
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Get flashcard IDs by chapter
-
-```
-GET /get-chapter-flashcards
-```
-
-Returns all flashcard IDs belonging to a chapter. Requires viewer access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `chapter_id` | string | Yes | ID of the chapter |
-
-**Response `200`:**
-```json
-{
-  "flash_card_ids": [1, 2, 3]
-}
-```
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Get flashcards by difficulty
-
-```
-GET /get-flashcards-difficulty
-```
-
-Returns flashcard IDs filtered by one or more difficulty levels. Requires viewer access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | string | Yes | ID of the subject |
-| `chapter_id` | integer | No | Scope results to a specific chapter within the subject |
-| `difficulties[]` | integer (CSV) | Yes | Difficulty values to filter by (-1 to 2) |
-
-**Example requests:**
-```
-GET /get-flashcards-difficulty?id=5&difficulties[]=0&difficulties[]=1
-GET /get-flashcards-difficulty?id=5&chapter_id=3&difficulties[]=0&difficulties[]=1
-```
-
-**Response `200`:**
-```json
-{
-  "flash_card_ids": [1, 4, 7]
-}
-```
-
-**Error Responses:** `400`, `401`, `404`, `500`
-
----
-
-### Get flashcard difficulty counts
-
-```
-GET /get-flashcard-results
-```
-
-Returns a count of flashcards for each difficulty level in a subject. Requires viewer access.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | string | Yes | ID of the subject |
-| `chapter_id` | integer | No | Scope counts to a specific chapter within the subject |
-
-**Response `200`:**
-```json
-{
-  "difficulty_counts": {
-    "-1": 5,
-    "0": 3,
-    "1": 8,
-    "2": 12
-  }
-}
-```
-
-**Error Responses:** `400`, `401`, `404`, `500`
+**200 Response:** updated [`Flashcard`](#flashcard) with fresh `last_result` / `last_used`.
 
 ---
 
 ## Search Endpoints
 
-All search endpoints perform text matching against the specified fields for each entity type. The backend handles tokenization, normalization, and relevance ranking internally.
+### Search subjects (auth)
+`GET /search/subjects?q=<query>` — Matches subjects the caller can see. Limit: 20 results.
 
-**Query behavior:**
-- Partial word matching is supported (e.g., "eigen" matches "eigenvalue")
-- Multiple words in the query are matched independently (e.g., "linear independent" matches content containing both words)
-- Special characters common in markdown content (LaTeX backslash commands like `\frac{}`, code fences, URLs) are handled transparently — queries are matched against the raw content
-- Results are ordered by relevance
+**200 Response:** implementation-defined result shape (see `pkg/search`). Returns `[]` when no matches.
 
 ---
 
-### Search subjects
-
-```
-GET /search-subjects
-```
-
-Performs text search on subject names and tags across all subjects the authenticated user has access to (owned, collaborated, friend-visible, subscribed).
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `q` | string | Yes | Search query |
-
-**Response `200`:** Array of matching [Subject](#subject) (includes `ownerUsername`)
-
-**Error Responses:** `400`, `401`, `500`
-
----
-
-### Search chapters
-
-```
-GET /search-chapters
-```
-
-Performs text search on chapter titles across all accessible subjects (when no `subject_id` given) or scoped to a specific subject.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `q` | string | Yes | Search query |
-| `subject_id` | integer | No | Limit results to a specific subject |
-
-**Response `200`:** Array of matching [Chapter](#chapter)
-
-**Error Responses:** `400`, `401`, `500`
-
----
-
-### Search flashcards
-
-```
-GET /search-flashcards
-```
-
-Performs text search across flashcard titles, questions, and answers across all accessible subjects (when no filters given) or scoped to a specific subject/chapter.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `q` | string | Yes | Search query |
-| `subject_id` | integer | No | Limit results to a specific subject |
-| `chapter_id` | integer | No | Limit results to a specific chapter |
-
-**Response `200`:** Array of matching [FlashCard](#flashcard)
-
-**Error Responses:** `400`, `401`, `500`
-
----
-
-### Search public subjects
-
-```
-GET /search-public-subjects
-```
-
-Performs text search across all subjects with `visibility: "public"`. Not scoped to the authenticated user — this is the global discovery endpoint.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `q` | string | Yes | Search query |
-
-**Response `200`:** Array of matching [Subject](#subject) (includes `ownerUsername`)
-
-**Error Responses:** `400`, `401`, `500`
-
----
-
-### Search users
-
-```
-GET /search-users
-```
-
-Performs text search on usernames across all users. Used for finding users to add as friends or collaborators.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `q` | string | Yes | Search query |
-
-**Response `200`:** Array of matching [User](#user)
-
-**Error Responses:** `400`, `401`, `500`
+### Search users (auth)
+`GET /search/users?q=<query>` — Public user search. Limit: 20 results. `q` is required (empty returns `[]`).
 
 ---
 
 ## Friendship Endpoints
 
-### Send a friend request
+### Send a friend request (verified)
+`POST /friendship-request`
 
-```
-POST /send-friend-request
-```
-
-Sends a friend request to another user. Cannot send to yourself, and cannot duplicate existing requests.
-
-**Authentication:** Required
-
-**Request Body:**
+**Body:**
 ```json
-{
-  "user_id": "string"
-}
+{ "receiver_id": 12 }
 ```
 
-**Response `200`:** [Friendship](#friendship)
-
-**Error Responses:** `400`, `401`, `404`
+**201 Response:** [`Friendship`](#friendship) with `status: "pending"`.
 
 ---
 
-### Respond to a friend request
-
-```
-POST /respond-friend-request
-```
-
-Accept or decline a pending friend request. Only the receiver can respond.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "friendship_id": "string",
-  "accept": true
-}
-```
-
-**Response `200`:** [Friendship](#friendship) (status updated to `"accepted"` or `"declined"`)
-
-**Error Responses:** `400`, `401`, `404`
+### Accept a friend request (auth)
+`POST /friendship-accept?id=<friendship_id>` — Receiver-only. **200 Response:** updated [`Friendship`](#friendship) (`status: "accepted"`).
 
 ---
 
-### Remove a friend
-
-```
-POST /remove-friend
-```
-
-Removes a friendship between the authenticated user and the target user. Either party can remove.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "user_id": "string"
-}
-```
-
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `404`
+### Decline a friend request (auth)
+`POST /friendship-decline?id=<friendship_id>` — Receiver-only. **200 Response:** updated [`Friendship`](#friendship) (`status: "declined"`).
 
 ---
 
-### Get friends list
-
-```
-GET /get-friends
-```
-
-Returns all accepted friends for the authenticated user.
-
-**Authentication:** Required
-
-**Response `200`:** Array of [User](#user)
-
-**Error Responses:** `401`
+### Unfriend (auth)
+`POST /friendship-unfriend?id=<friendship_id>` — Either party. **204 Response.**
 
 ---
 
-### Get incoming friend requests
-
-```
-GET /get-friend-requests
-```
-
-Returns pending friend requests received by the authenticated user.
-
-**Authentication:** Required
-
-**Response `200`:** Array of [Friendship](#friendship)
-
-**Error Responses:** `401`
+### List friends (auth)
+`GET /friendship-list` — All accepted friendships for the caller. **200 Response:** `[Friendship]`.
 
 ---
 
-### Get sent friend requests
-
-```
-GET /get-sent-friend-requests
-```
-
-Returns pending friend requests sent by the authenticated user.
-
-**Authentication:** Required
-
-**Response `200`:** Array of [Friendship](#friendship)
-
-**Error Responses:** `401`
-
----
-
-### Get user by ID
-
-```
-GET /get-user-by-id
-```
-
-Returns a user's public profile by their ID.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `id` | integer | Yes | User ID |
-
-**Response `200`:** [User](#user)
-
-**Error Responses:** `400`, `401`, `404`
+### List pending incoming requests (auth)
+`GET /friendship-pending` — Pending requests where the caller is the receiver. **200 Response:** `[Friendship]`.
 
 ---
 
 ## Subscription Endpoints
 
-### Subscribe to a public subject
+Subscriptions grant `viewer` access to a **public** subject owned by someone else.
 
-```
-POST /subscribe-subject
-```
+### Subscribe (auth)
+`POST /subject-subscribe?subject_id=<id>` — Target subject must have `visibility: "public"`. **204 Response.**
 
-Subscribes the authenticated user to a public subject. Only works on subjects with `visibility: "public"`. Cannot subscribe to your own subject.
+### Unsubscribe (auth)
+`POST /subject-unsubscribe?subject_id=<id>` — **204 Response.**
 
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "subject_id": "string"
-}
-```
-
-**Response `200`:**
-```json
-{
-  "id": 1,
-  "userId": 1,
-  "subjectId": 2,
-  "createdAt": "2024-01-01T00:00:00Z"
-}
-```
-
-**Error Responses:** `400`, `401`, `404`
-
----
-
-### Unsubscribe from a subject
-
-```
-POST /unsubscribe-subject
-```
-
-Removes the authenticated user's subscription to a subject.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "subject_id": "string"
-}
-```
-
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `404`
-
----
-
-### Get subscriptions
-
-```
-GET /get-subscriptions
-```
-
-Returns all subjects the authenticated user is subscribed to, with owner username and access level.
-
-**Authentication:** Required
-
-**Response `200`:** Array of [Subject](#subject) (with `ownerUsername` and `accessLevel: "viewer"`)
-
-**Error Responses:** `401`
+### List my subscriptions (auth)
+`GET /subject-subscriptions` — **200 Response:** `[int64]` (array of subject ids; `[]` when empty).
 
 ---
 
 ## Collaboration Endpoints
 
-### Add a collaborator
+### Add a collaborator (verified)
+`POST /collaborators` — Owner-only.
 
-```
-POST /add-collaborator
-```
-
-Adds a user as collaborator on a subject. Owner only.
-
-**Authentication:** Required
-
-**Request Body:**
+**Body:**
 ```json
-{
-  "subject_id": "string",
-  "user_id": "string",
-  "role": "editor"
-}
+{ "subject_id": 7, "user_id": 12, "role": "editor" }
 ```
+`role` is `"viewer"` or `"editor"`.
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `role` | Yes | `"editor"` or `"viewer"` |
-
-**Response `200`:** [Collaborator](#collaborator)
-
-**Error Responses:** `400`, `401`, `404`
+**201 Response:** [`Collaborator`](#collaborator)
 
 ---
 
-### Remove a collaborator
+### Remove a collaborator (verified)
+`POST /collaborator-remove?subject_id=<id>&user_id=<uid>` — Owner-only. **204 Response.**
 
-```
-POST /remove-collaborator
-```
+---
 
-Removes a collaborator from a subject. Owner only.
+### List collaborators (auth)
+`GET /collaborators?subject_id=<id>` — Any user with at least `viewer` access. **200 Response:** `[Collaborator]` (always an array, never `null`).
 
-**Authentication:** Required
+---
 
-**Request Body:**
+### Create an invite link (verified)
+`POST /collaboration-invites` — Owner-only.
+
+**Body:**
 ```json
-{
-  "subject_id": "string",
-  "user_id": "string"
-}
+{ "subject_id": 7, "role": "editor", "ttl_hours": 72 }
 ```
+`ttl_hours <= 0` means no expiry.
 
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `404`
+**201 Response:** [`InviteLink`](#invitelink)
 
 ---
 
-### Update collaborator role
+### Redeem an invite link (verified)
+`POST /collaboration-invite-redeem?token=<token>` — Upgrades the caller's access to the subject according to the invite's role.
 
-```
-PUT /update-collaborator-role
-```
+**200 Response:** [`Collaborator`](#collaborator)
 
-Changes a collaborator's role. Owner only.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "subject_id": "string",
-  "user_id": "string",
-  "role": "viewer"
-}
-```
-
-**Response `200`:** [Collaborator](#collaborator)
-
-**Error Responses:** `400`, `401`, `404`
-
----
-
-### Get collaborators
-
-```
-GET /get-collaborators
-```
-
-Lists all collaborators for a subject. Accessible to the owner and any collaborator.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `subject_id` | integer | Yes | Subject ID |
-
-**Response `200`:** Array of [Collaborator](#collaborator)
-
-**Error Responses:** `400`, `401`, `404`
-
----
-
-### Get collaborated subjects
-
-```
-GET /get-collaborated-subjects
-```
-
-Returns subjects the authenticated user collaborates on (does not include owned subjects).
-
-**Authentication:** Required
-
-**Response `200`:** Array of [Subject](#subject) (with `accessLevel` and `ownerUsername`)
-
-**Error Responses:** `401`
-
----
-
-### Create an invite link
-
-```
-POST /create-invite-link
-```
-
-Creates a shareable invite link for a subject. Owner only. The link contains a random 64-character hex token.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "subject_id": "string",
-  "role": "editor",
-  "expires_at": "2025-12-31T23:59:59Z"
-}
-```
-
-| Field | Required | Notes |
-|-------|----------|-------|
-| `role` | Yes | `"editor"` or `"viewer"` |
-| `expires_at` | No | RFC3339 timestamp. Omit or `null` for no expiration |
-
-**Response `200`:** [InviteLink](#invitelink)
-
-**Error Responses:** `400`, `401`, `404`
-
----
-
-### Accept an invite link
-
-```
-POST /accept-invite-link
-```
-
-Uses an invite token to join as collaborator on a subject. If already a collaborator, updates the role to match the link's role.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "token": "abc123def456..."
-}
-```
-
-**Response `200`:** [Collaborator](#collaborator)
-
-**Error Responses:** `400`, `401`, `404`
-
----
-
-### Delete an invite link
-
-```
-POST /delete-invite-link
-```
-
-Revokes an invite link. Owner only.
-
-**Authentication:** Required
-
-**Request Body:**
-```json
-{
-  "invite_id": "string"
-}
-```
-
-**Response `204`:** No content
-
-**Error Responses:** `400`, `401`, `404`
-
----
-
-### Get invite links
-
-```
-GET /get-invite-links
-```
-
-Lists active invite links for a subject. Owner only.
-
-**Authentication:** Required
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `subject_id` | integer | Yes | Subject ID |
-
-**Response `200`:** Array of [InviteLink](#invitelink)
-
-**Error Responses:** `400`, `401`, `404`
+**Errors:** 400 `invalid_input` (missing token / expired / already redeemed), 401, 403, 404.
 
 ---
 
 ## Preferences Endpoints
 
-User-scoped settings that drive optional UI chrome (AI planning, daily goal target). All preferences are created with server-side defaults on first fetch; clients never need to bootstrap them.
+### Get preferences (auth)
+`GET /preferences` — Lazily creates a default row on first access.
 
-### Get preferences
+**200 Response:** [`Prefs`](#preferences-prefs)
 
-```
-GET /get-preferences
-```
+### Update preferences (auth)
+`POST /preferences-update`
 
-Returns the authenticated user's preference set. Missing keys are filled with server defaults on first call and persisted so subsequent reads are stable.
-
-**Authentication:** Required (verified)
-
-**Response `200`:** [Preferences](#preferences)
-
-**Error Responses:** `401`, `403`, `500`
-
----
-
-### Update preferences
-
-```
-PUT /update-preferences
-```
-
-Updates one or more preference fields. Omitted fields are left untouched. Changes take effect immediately.
-
-**Authentication:** Required (verified)
-
-**Request Body:**
+**Body:**
 ```json
-{
-  "aiPlanningEnabled": true,
-  "dailyGoalTarget": 25
-}
+{ "ai_planning_enabled": true, "daily_goal_target": 30 }
 ```
+Both fields are optional; `null` leaves the existing value untouched.
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `aiPlanningEnabled` | No | When toggled from `false` → `true`, the server initialises (or refreshes) the user's [DailyGoal](#dailygoal) for the current day using `dailyGoalTarget` |
-| `dailyGoalTarget` | No | Integer between `1` and `200`. When changed, takes effect on the next day rollover; the current day's target is left as-is |
-
-**Response `200`:** [Preferences](#preferences)
-
-**Error Responses:** `400`, `401`, `403`, `500`
+**200 Response:** updated [`Prefs`](#preferences-prefs).
 
 ---
 
 ## Gamification Endpoints
 
-Gamification state (streaks, daily goals, achievements) is tracked server-side so it persists across devices and reinstalls. The frontend only renders it when [`Preferences.aiPlanningEnabled`](#preferences) is `true`, but the server keeps the data flowing regardless so that toggling AI mode back on reveals accurate state.
+### Get gamification state (auth)
+`GET /gamification-state`
 
-### Get gamification state
-
-```
-GET /get-gamification-state
-```
-
-Returns the current streak, daily goal, and derived session stats for the authenticated user. Safe to poll; cheap on the server.
-
-**Authentication:** Required (verified)
-
-**Response `200`:**
+**200 Response:**
 ```json
 {
-  "streak": {
-    "currentDays": 4,
-    "bestDays": 11,
-    "lastStudiedDate": "2024-04-16"
-  },
-  "dailyGoal": {
-    "target": 20,
-    "doneToday": 8,
-    "date": "2024-04-17"
-  },
-  "bestSessionGoods": 18
+  "streak":     { "...": "Streak" },
+  "daily_goal": { "...": "DailyGoal" }
 }
 ```
-
-| Field | Notes |
-|-------|-------|
-| `streak` | See [StreakState](#streakstate). When the user misses a day, `currentDays` is reset to `0` the first time this endpoint is called after the missed day |
-| `dailyGoal` | See [DailyGoal](#dailygoal). `date` always reflects the user's current local day; `doneToday` resets at rollover |
-| `bestSessionGoods` | Highest `goods` count recorded in any single [TrainingSession](#trainingsession). Used by achievements like "Perfect Session" |
-
-**Error Responses:** `401`, `403`, `500`
+See [`Streak`](#streak) and [`DailyGoal`](#dailygoal).
 
 ---
 
-### Get achievements
+### Record a training session (auth)
+`POST /training-session-record` — Inserts a session row, advances streak + daily goal, unlocks any newly-earned achievements.
 
+**Body:**
+```json
+{ "subject_id": 7, "card_count": 18, "duration_ms": 274000, "score": 80 }
 ```
-GET /get-achievements
-```
 
-Returns the full achievement catalogue together with the authenticated user's progress on each entry.
-
-**Authentication:** Required (verified)
-
-**Response `200`:**
+**200 Response:**
 ```json
 {
-  "achievements": [
-    {
-      "achievement": {
-        "id": "centurion",
-        "title": "Centurion",
-        "description": "Master 100 flashcards.",
-        "icon": "🏆",
-        "category": "mastery",
-        "target": 100
-      },
-      "current": 62,
-      "unlocked": false,
-      "unlockedAt": null
-    }
-  ]
+  "session":       { "...": "TrainingSession" },
+  "streak":        { "...": "Streak" },
+  "daily_goal":    { "...": "DailyGoal" },
+  "newly_awarded": [{ "...": "Achievement" }]
 }
 ```
-
-| Field | Notes |
-|-------|-------|
-| `achievement` | See [Achievement](#achievement) |
-| `current` | Progress toward `achievement.target` in the same unit as `target` |
-| `unlocked` | `true` once `current >= target` and the unlock has been committed server-side |
-| `unlockedAt` | RFC3339 timestamp of the unlock, or `null` if still locked |
-
-**Error Responses:** `401`, `403`, `500`
 
 ---
 
-### Record a training session
+### Get user stats (auth)
+`GET /user-stats` — Gamification-scope stats (different shape from `/get-user-stats`).
 
-```
-POST /record-training-session
-```
-
-Records the result of a completed training session. The server updates the streak, daily goal, and `bestSessionGoods`, then evaluates the achievement catalogue and returns any newly unlocked entries.
-
-Clients should call this endpoint exactly once per session, after [`/update-flashcard-result`](#update-flashcard-result) has been called for every card reviewed.
-
-**Authentication:** Required (verified)
-
-**Request Body:**
+**200 Response:**
 ```json
 {
-  "subject_id": 1,
-  "goods": 12,
-  "oks": 4,
-  "bads": 2
+  "total_cards": 297,
+  "total_sessions": 14,
+  "current_streak": 4,
+  "longest_streak": 11
 }
 ```
-
-| Field | Required | Notes |
-|-------|----------|-------|
-| `subject_id` | Yes | Subject the session was scoped to. User must have at least viewer access |
-| `goods` | Yes | Number of cards answered correctly in the session |
-| `oks` | Yes | Number of partial answers |
-| `bads` | Yes | Number of incorrect answers |
-
-`totalCards` is derived on the server as `goods + oks + bads`.
-
-**Response `200`:**
-```json
-{
-  "session": {
-    "id": 42,
-    "subjectId": 1,
-    "goods": 12,
-    "oks": 4,
-    "bads": 2,
-    "totalCards": 18,
-    "completedAt": "2024-04-17T10:31:00Z"
-  },
-  "streak": {
-    "currentDays": 5,
-    "bestDays": 11,
-    "lastStudiedDate": "2024-04-17"
-  },
-  "dailyGoal": {
-    "target": 20,
-    "doneToday": 18,
-    "date": "2024-04-17"
-  },
-  "newlyUnlocked": [
-    {
-      "id": "perfect-session",
-      "unlockedAt": "2024-04-17T10:31:00Z"
-    }
-  ]
-}
-```
-
-| Field | Notes |
-|-------|-------|
-| `session` | See [TrainingSession](#trainingsession) |
-| `streak` | Updated [StreakState](#streakstate) after this session |
-| `dailyGoal` | Updated [DailyGoal](#dailygoal) with `doneToday` incremented by `totalCards` |
-| `newlyUnlocked` | Array of [UnlockedAchievement](#unlockedachievement) for achievements that flipped from locked → unlocked as a result of this session. Empty array when nothing unlocked |
-
-**Error Responses:** `400`, `401`, `403`, `404`, `500`
 
 ---
 
-### Update daily goal
+### List achievements (auth)
+`GET /achievements` — Returns the full achievement catalogue, each entry annotated with `unlocked_at` for the caller (or `null` if locked).
 
-```
-PUT /update-daily-goal
-```
-
-Overrides the user's current daily goal target. Unlike the preference field of the same name, this mutates the **active** day's goal immediately — used by the "change today's goal" button in the UI.
-
-**Authentication:** Required (verified)
-
-**Request Body:**
-```json
-{
-  "target": 30
-}
-```
-
-| Field | Required | Notes |
-|-------|----------|-------|
-| `target` | Yes | Integer between `1` and `200`. Also written back to [Preferences](#preferences).`dailyGoalTarget` so tomorrow's goal picks up the new value |
-
-**Response `200`:** [DailyGoal](#dailygoal)
-
-**Error Responses:** `400`, `401`, `403`, `500`
+**200 Response:** `[Achievement]`
 
 ---
 
-## Backend File Structure
+## Billing Endpoints (stub)
 
-```
-study_buddy_backend/
-├── cmd/
-│   └── app/
-│       └── main.go                        # Application entrypoint, route registration
-├── api/
-│   ├── handler/
-│   │   ├── chapterHandler.go              # Chapter HTTP handlers
-│   │   ├── collaborationHandler.go        # Collaboration HTTP handlers
-│   │   ├── flashCardHandler.go            # Flash card HTTP handlers
-│   │   ├── friendshipHandler.go           # Friendship HTTP handlers
-│   │   ├── gamificationHandler.go         # Streak, daily goal, achievements, training sessions
-│   │   ├── imageHandler.go               # Image upload/serve/delete handlers
-│   │   ├── preferencesHandler.go          # Preferences HTTP handlers (AI toggle, daily goal target)
-│   │   ├── searchHandler.go               # Search HTTP handlers
-│   │   ├── subjectHandler.go              # Subject HTTP handlers
-│   │   ├── subscriptionHandler.go         # Subscription HTTP handlers
-│   │   ├── userHandler.go                 # User + email verification + profile + user stats handlers
-│   │   ├── types.go                       # Shared request/response types
-│   │   └── handlers_test.go              # HTTP-level integration tests
-│   └── service/
-│       ├── accessService.go               # Centralized access resolution
-│       ├── achievementService.go          # Achievement catalogue + progress evaluation
-│       ├── chapterService.go              # Chapter business logic
-│       ├── collaborationService.go        # Collaboration + invite link logic
-│       ├── emailVerificationService.go    # Email verification tokens + verification logic
-│       ├── flashCardService.go            # Flash card business logic
-│       ├── friendshipService.go           # Friendship business logic
-│       ├── gamificationService.go         # Streaks, daily goals, training session recording
-│       ├── imageService.go               # Image upload, retrieval, deletion
-│       ├── preferencesService.go          # Preferences read/write with defaults
-│       ├── searchService.go               # Search business logic
-│       ├── subjectService.go              # Subject business logic + copy
-│       ├── subscriptionService.go         # Subscription business logic
-│       ├── userService.go                 # User business logic (register, login, profile, stats)
-│       ├── main_test.go                   # Test setup (TestMain, shared pool)
-│       ├── accessService_test.go          # Access resolution tests
-│       ├── achievementService_test.go     # Achievement evaluation tests
-│       ├── chapterService_test.go         # Chapter tests
-│       ├── collaborationService_test.go   # Collaboration tests
-│       ├── emailVerificationService_test.go # Email verification tests
-│       ├── flashCardService_test.go       # Flash card tests
-│       ├── friendshipService_test.go      # Friendship tests
-│       ├── gamificationService_test.go    # Streak / daily goal / session tests
-│       ├── imageService_test.go           # Image upload/delete tests
-│       ├── preferencesService_test.go     # Preferences tests
-│       ├── searchService_test.go          # Search tests
-│       ├── subjectService_test.go         # Subject + copy tests
-│       ├── subscriptionService_test.go    # Subscription tests
-│       └── userService_test.go            # User tests
-├── internal/
-│   ├── db/
-│   │   └── hash.go                        # Password hashing utilities
-│   ├── email/
-│   │   └── email.go                       # SMTP email sending (verification emails)
-│   ├── jwt/
-│   │   └── jwt.go                         # JWT authentication + middleware + RequireVerified
-│   ├── myErrors/
-│   │   └── errors.go                      # Custom error definitions (400, 401, 403, 404, 500)
-│   └── storage/
-│       └── storage.go                     # Local filesystem image storage
-├── pkg/
-│   ├── achievement/
-│   │   └── achievement.go                 # Achievement catalogue entries + UnlockedAchievement model
-│   ├── chapter/
-│   │   └── chapter.go                     # Chapter model
-│   ├── database/
-│   │   └── search_setup.go               # Full-text search setup
-│   ├── dailyGoal/
-│   │   └── dailyGoal.go                   # DailyGoal model + date-rollover helpers
-│   ├── flashCard/
-│   │   └── flashCard.go                   # Flash card model
-│   ├── graph/
-│   │   └── graph.go                       # Graph data structure
-│   ├── id/
-│   │   └── id.go                          # ID generation (NewUserID, NewImageID)
-│   ├── preferences/
-│   │   └── preferences.go                 # Preferences model (aiPlanningEnabled, dailyGoalTarget)
-│   ├── streak/
-│   │   └── streak.go                      # StreakState model + streak computation
-│   ├── subject/
-│   │   └── subject.go                     # Subject model (includes Icon, Visibility, AccessLevel, OwnerUsername)
-│   ├── trainingSession/
-│   │   └── trainingSession.go             # TrainingSession model
-│   └── user/
-│       └── user.go                        # User model (includes Email, EmailVerified, ProfilePicture)
-├── testutil/
-│   ├── testdb.go                          # Test DB connection + cleanup
-│   └── fixtures.go                        # Test data factories
-├── uploads/                               # Image upload directory (created at startup)
-├── db_sql/
-│   ├── setup.go                           # Database schema setup (tables, indexes, migrations)
-│   └── seed.go                            # Database seed data
-├── docs/
-│   ├── docs.go                            # Swagger generated docs
-│   ├── swagger.json
-│   └── swagger.yaml
-├── vendor/                                # Go vendored dependencies
-├── API.md                                 # API documentation
-├── go.mod                                 # Go module definition
-├── go.sum                                 # Go dependency checksums
-├── launch_app.sh                          # App launch script
-└── setup_db.sh                            # Database setup script
-```
+All billing routes return **501 `not_implemented`** until Spec C lands.
+
+- `POST /billing/checkout` — auth
+- `POST /billing/portal` — auth
+- `POST /billing/webhook` — public (Stripe will post here)
+
+---
+
+## AI Endpoints (stub)
+
+All AI routes require auth + verified and return **501 `not_implemented`** until Spec A lands.
+
+- `POST /ai/flashcards/prompt` — generate flashcards from a text prompt
+- `POST /ai/flashcards/pdf` — generate flashcards from an uploaded PDF
+- `POST /ai/check` — AI-driven answer checking
+
+---
+
+## Quiz Endpoints (stub)
+
+All quiz routes require auth + verified and return **501 `not_implemented`** until Spec D lands.
+
+- `POST /quiz/generate` — generate a quiz from a subject/chapter
+- `POST /quiz/attempt?id=<quiz_id>` — submit an attempt
+- `POST /quiz/share?id=<quiz_id>` — share a quiz to friends
+
+---
+
+## Plan Endpoints (stub)
+
+All study-plan routes require auth + verified and return **501 `not_implemented`** until Spec B lands.
+
+- `POST /plan/generate` — generate a study plan
+- `GET /plan/progress?id=<plan_id>` — read plan progress
+
+---
+
+## Duel Endpoints (stub)
+
+All duel routes require auth + verified and return **501 `not_implemented`** until Spec E lands. `GET /duel/connect` will upgrade to WebSocket once implemented.
+
+- `POST /duel/invite` — invite a friend to a duel
+- `POST /duel/accept?id=<duel_id>` — accept a duel invite
+- `GET /duel/connect?id=<duel_id>` — subscribe to duel events (WebSocket)
