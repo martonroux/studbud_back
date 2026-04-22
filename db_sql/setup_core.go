@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS invite_links (
 
 CREATE TABLE IF NOT EXISTS preferences (
     user_id              BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    ai_planning_enabled  BOOLEAN NOT NULL DEFAULT false,
+    ai_planning_enabled  BOOLEAN NOT NULL DEFAULT true,
     daily_goal_target    INT NOT NULL DEFAULT 20,
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
