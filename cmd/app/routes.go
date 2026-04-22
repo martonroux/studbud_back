@@ -1,0 +1,146 @@
+package main
+
+import (
+	"context"
+	"net/http"
+
+	"studbud/backend/api/handler"
+	"studbud/backend/internal/http/middleware"
+)
+
+// buildRouter constructs the ServeMux and wraps it with the global middleware stack.
+func buildRouter(d *deps) http.Handler {
+	mux := http.NewServeMux()
+
+	authMW := middleware.Auth(d.signer, func(uid int64) (bool, error) {
+		return d.user.IsAdmin(context.Background(), uid)
+	})
+	verifiedMW := middleware.RequireVerified()
+
+	registerPublicRoutes(mux, d)
+	registerAuthRoutes(mux, d, authMW)
+	registerVerifiedRoutes(mux, d, authMW, verifiedMW)
+	registerStubRoutes(mux, d, authMW, verifiedMW)
+
+	stack := middleware.Chain(
+		middleware.Recoverer(),
+		middleware.RequestID(),
+		middleware.CORS(d.cfg.FrontendURL),
+		middleware.Logger(),
+	)
+	return stack(mux)
+}
+
+// registerPublicRoutes attaches routes that require no authentication.
+func registerPublicRoutes(mux *http.ServeMux, d *deps) {
+	userH := handler.NewUserHandler(d.user, d.emailVer)
+	emailVerH := handler.NewEmailVerificationHandler(d.emailVer, d.user)
+	imgH := handler.NewImageHandler(d.image)
+	billH := handler.NewBillingHandler(d.billing)
+
+	mux.HandleFunc("POST /user-register", userH.Register)
+	mux.HandleFunc("POST /user-login", userH.Login)
+	mux.HandleFunc("GET /verify-email", emailVerH.Verify)
+	mux.HandleFunc("GET /images/{id}", imgH.Serve)
+	mux.HandleFunc("POST /billing/webhook", billH.Webhook)
+}
+
+// registerAuthRoutes attaches routes that require authentication but not email verification.
+func registerAuthRoutes(mux *http.ServeMux, d *deps, authMW middleware.Middleware) {
+	userH := handler.NewUserHandler(d.user, d.emailVer)
+	emailVerH := handler.NewEmailVerificationHandler(d.emailVer, d.user)
+	subjH := handler.NewSubjectHandler(d.subject)
+	chapH := handler.NewChapterHandler(d.chapter)
+	fcH := handler.NewFlashcardHandler(d.flashcard)
+	searchH := handler.NewSearchHandler(d.search)
+	friendH := handler.NewFriendshipHandler(d.friendship)
+	subsH := handler.NewSubjectSubscriptionHandler(d.subjectSub)
+	collabH := handler.NewCollaborationHandler(d.collab)
+	prefH := handler.NewPreferencesHandler(d.preferences)
+	gamH := handler.NewGamificationHandler(d.gamification)
+	billH := handler.NewBillingHandler(d.billing)
+
+	auth := func(h http.HandlerFunc) http.Handler { return authMW(http.HandlerFunc(h)) }
+
+	mux.Handle("POST /user-test-jwt", auth(userH.TestJWT))
+	mux.Handle("POST /resend-verification", auth(emailVerH.Resend))
+	mux.Handle("GET /subject-list", auth(subjH.List))
+	mux.Handle("GET /subject", auth(subjH.Get))
+	mux.Handle("GET /chapter-list", auth(chapH.List))
+	mux.Handle("GET /flashcard-list", auth(fcH.ListBySubject))
+	mux.Handle("GET /flashcard", auth(fcH.Get))
+	mux.Handle("POST /flashcard-review", auth(fcH.Review))
+	mux.Handle("GET /search/subjects", auth(searchH.Subjects))
+	mux.Handle("GET /search/users", auth(searchH.Users))
+	mux.Handle("POST /friendship-accept", auth(friendH.Accept))
+	mux.Handle("POST /friendship-decline", auth(friendH.Decline))
+	mux.Handle("POST /friendship-unfriend", auth(friendH.Unfriend))
+	mux.Handle("GET /friendship-list", auth(friendH.ListFriends))
+	mux.Handle("GET /friendship-pending", auth(friendH.ListPending))
+	mux.Handle("POST /subject-subscribe", auth(subsH.Subscribe))
+	mux.Handle("POST /subject-unsubscribe", auth(subsH.Unsubscribe))
+	mux.Handle("GET /subject-subscriptions", auth(subsH.List))
+	mux.Handle("GET /collaborators", auth(collabH.ListCollaborators))
+	mux.Handle("GET /preferences", auth(prefH.Get))
+	mux.Handle("POST /preferences-update", auth(prefH.Update))
+	mux.Handle("GET /gamification-state", auth(gamH.State))
+	mux.Handle("POST /training-session-record", auth(gamH.RecordSession))
+	mux.Handle("GET /user-stats", auth(gamH.Stats))
+	mux.Handle("GET /achievements", auth(gamH.Achievements))
+	mux.Handle("POST /billing/checkout", auth(billH.Checkout))
+	mux.Handle("POST /billing/portal", auth(billH.Portal))
+}
+
+// registerVerifiedRoutes attaches routes that require authentication and email verification.
+func registerVerifiedRoutes(mux *http.ServeMux, d *deps, authMW, verifiedMW middleware.Middleware) {
+	userH := handler.NewUserHandler(d.user, d.emailVer)
+	imgH := handler.NewImageHandler(d.image)
+	subjH := handler.NewSubjectHandler(d.subject)
+	chapH := handler.NewChapterHandler(d.chapter)
+	fcH := handler.NewFlashcardHandler(d.flashcard)
+	friendH := handler.NewFriendshipHandler(d.friendship)
+	collabH := handler.NewCollaborationHandler(d.collab)
+
+	av := func(h http.HandlerFunc) http.Handler { return authMW(verifiedMW(http.HandlerFunc(h))) }
+
+	mux.Handle("POST /set-profile-picture", av(userH.SetProfilePicture))
+	mux.Handle("GET /get-user-stats", av(userH.Stats))
+	mux.Handle("POST /upload-image", av(imgH.Upload))
+	mux.Handle("POST /delete-image", av(imgH.Delete))
+	mux.Handle("POST /subject-create", av(subjH.Create))
+	mux.Handle("POST /subject-update", av(subjH.Update))
+	mux.Handle("POST /subject-delete", av(subjH.Delete))
+	mux.Handle("POST /chapter-create", av(chapH.Create))
+	mux.Handle("POST /chapter-update", av(chapH.Update))
+	mux.Handle("POST /chapter-delete", av(chapH.Delete))
+	mux.Handle("POST /flashcard-create", av(fcH.Create))
+	mux.Handle("POST /flashcard-update", av(fcH.Update))
+	mux.Handle("POST /flashcard-delete", av(fcH.Delete))
+	mux.Handle("POST /friendship-request", av(friendH.Request))
+	mux.Handle("POST /collaborators", av(collabH.AddCollaborator))
+	mux.Handle("POST /collaborator-remove", av(collabH.RemoveCollaborator))
+	mux.Handle("POST /collaboration-invites", av(collabH.CreateInvite))
+	mux.Handle("POST /collaboration-invite-redeem", av(collabH.RedeemInvite))
+}
+
+// registerStubRoutes attaches AI, quiz, plan, and duel stub routes (auth + verified).
+func registerStubRoutes(mux *http.ServeMux, d *deps, authMW, verifiedMW middleware.Middleware) {
+	aiH := handler.NewAIHandler(d.ai)
+	quizH := handler.NewQuizHandler(d.quiz)
+	planH := handler.NewPlanHandler(d.plan)
+	duelH := handler.NewDuelHandler(d.duel)
+
+	av := func(h http.HandlerFunc) http.Handler { return authMW(verifiedMW(http.HandlerFunc(h))) }
+
+	mux.Handle("POST /ai/flashcards/prompt", av(aiH.GenerateFromPrompt))
+	mux.Handle("POST /ai/flashcards/pdf", av(aiH.GenerateFromPDF))
+	mux.Handle("POST /ai/check", av(aiH.Check))
+	mux.Handle("POST /quiz/generate", av(quizH.Generate))
+	mux.Handle("POST /quiz/attempt", av(quizH.Attempt))
+	mux.Handle("POST /quiz/share", av(quizH.Share))
+	mux.Handle("POST /plan/generate", av(planH.Generate))
+	mux.Handle("GET /plan/progress", av(planH.Progress))
+	mux.Handle("POST /duel/invite", av(duelH.Invite))
+	mux.Handle("POST /duel/accept", av(duelH.Accept))
+	mux.Handle("GET /duel/connect", av(duelH.Connect))
+}
