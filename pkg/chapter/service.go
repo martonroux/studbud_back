@@ -125,6 +125,7 @@ func (s *Service) Delete(ctx context.Context, uid, id int64) error {
 	return nil
 }
 
+// load fetches a chapter row by id, returning ErrNotFound when absent.
 func (s *Service) load(ctx context.Context, id int64) (*Chapter, error) {
 	var ch Chapter
 	err := s.db.QueryRow(ctx, `
@@ -140,6 +141,7 @@ func (s *Service) load(ctx context.Context, id int64) (*Chapter, error) {
 	return &ch, nil
 }
 
+// ensureEdit returns ErrForbidden unless the caller has edit rights on the subject.
 func (s *Service) ensureEdit(ctx context.Context, uid, subjectID int64) error {
 	level, err := s.access.SubjectLevel(ctx, uid, subjectID)
 	if err != nil {
