@@ -11,8 +11,8 @@ import (
 
 // UserHandler wires HTTP routes for user-scope operations.
 type UserHandler struct {
-	svc      *user.Service
-	verifier *emailverification.Service
+	svc      *user.Service              // svc is the user domain service
+	verifier *emailverification.Service // verifier issues and validates email verification tokens
 }
 
 // NewUserHandler constructs the handler.

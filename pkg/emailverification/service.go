@@ -17,10 +17,10 @@ import (
 
 // Service owns verification token issuance, verification, and throttling.
 type Service struct {
-	db          *pgxpool.Pool
-	mailer      email.Sender
-	frontendURL string
-	ttl         time.Duration
+	db          *pgxpool.Pool // db is the shared PostgreSQL connection pool
+	mailer      email.Sender  // mailer sends outbound verification emails
+	frontendURL string        // frontendURL is the base URL used to build the verification link
+	ttl         time.Duration // ttl is how long a verification token remains valid
 }
 
 // NewService constructs the email verification service.

@@ -16,8 +16,8 @@ import (
 
 // Service owns user register, login, profile-picture, and stats.
 type Service struct {
-	db     *pgxpool.Pool
-	signer *jwtsigner.Signer
+	db     *pgxpool.Pool     // db is the shared PostgreSQL connection pool
+	signer *jwtsigner.Signer // signer issues and verifies JWTs
 }
 
 // NewService constructs the user service.

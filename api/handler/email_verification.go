@@ -12,8 +12,8 @@ import (
 
 // EmailVerificationHandler handles verify + resend routes.
 type EmailVerificationHandler struct {
-	verifier *emailverification.Service
-	users    *user.Service
+	verifier *emailverification.Service // verifier issues and validates email verification tokens
+	users    *user.Service              // users provides user lookups for the resend flow
 }
 
 // NewEmailVerificationHandler constructs the handler.
