@@ -11,6 +11,7 @@ import (
 type Claims struct {
 	UID           int64 `json:"uid"`            // UID is the authenticated user ID
 	EmailVerified bool  `json:"email_verified"` // EmailVerified reflects the user's verification state at token issue time
+	IsAdmin       bool  `json:"is_admin"`       // IsAdmin reflects users.is_admin at token issue time
 	jwt.RegisteredClaims
 }
 

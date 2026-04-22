@@ -47,7 +47,9 @@ func run() error {
 
 	<-ctx.Done()
 	log.Print("shutting down")
-	return shutdown(srv)
+	err = shutdown(srv)
+	d.scheduler.Wait()
+	return err
 }
 
 // newServer builds the http.Server with the wired router and safe header timeout.

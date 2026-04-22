@@ -44,7 +44,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (string, int64
 		}
 		return "", 0, fmt.Errorf("insert user:\n%w", err)
 	}
-	tok, err := s.signer.Sign(jwtsigner.Claims{UID: id, EmailVerified: false})
+	tok, err := s.signer.Sign(jwtsigner.Claims{UID: id, EmailVerified: false, IsAdmin: false})
 	if err != nil {
 		return "", 0, err
 	}
@@ -73,7 +73,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (string, error) {
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Password)) != nil {
 		return "", fmt.Errorf("bad password:\n%w", myErrors.ErrUnauthenticated)
 	}
-	return s.signer.Sign(jwtsigner.Claims{UID: id, EmailVerified: verified})
+	return s.signer.Sign(jwtsigner.Claims{UID: id, EmailVerified: verified, IsAdmin: admin})
 }
 
 // ByID returns the user row.
@@ -88,16 +88,6 @@ func (s *Service) ByID(ctx context.Context, uid int64) (*User, error) {
 		return nil, fmt.Errorf("load user:\n%w", err)
 	}
 	return u, nil
-}
-
-// IsAdmin returns whether the user is flagged is_admin.
-func (s *Service) IsAdmin(ctx context.Context, uid int64) (bool, error) {
-	var ok bool
-	err := s.db.QueryRow(ctx, `SELECT is_admin FROM users WHERE id = $1`, uid).Scan(&ok)
-	if err != nil {
-		return false, fmt.Errorf("check admin:\n%w", err)
-	}
-	return ok, nil
 }
 
 // SetProfilePicture sets the user's profile_picture_image_id (image must be owned by user).

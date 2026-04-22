@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -15,7 +16,8 @@ type Job struct {
 
 // Scheduler fires Jobs at their intervals until ctx cancels.
 type Scheduler struct {
-	jobs []Job // jobs is the registered list
+	jobs []Job          // jobs is the registered list
+	wg   sync.WaitGroup // wg tracks running job goroutines so Wait can block until they exit
 }
 
 // New constructs an empty Scheduler.
@@ -31,8 +33,18 @@ func (s *Scheduler) Register(j Job) {
 // Start launches one goroutine per registered job. Returns immediately.
 func (s *Scheduler) Start(ctx context.Context) {
 	for _, j := range s.jobs {
-		go runJob(ctx, j)
+		s.wg.Add(1)
+		go func(job Job) {
+			defer s.wg.Done()
+			runJob(ctx, job)
+		}(j)
 	}
+}
+
+// Wait blocks until all job goroutines have returned.
+// Call after the context passed to Start is cancelled.
+func (s *Scheduler) Wait() {
+	s.wg.Wait()
 }
 
 func runJob(ctx context.Context, j Job) {

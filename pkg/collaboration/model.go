@@ -13,11 +13,11 @@ type Collaborator struct {
 
 // InviteLink represents an opaque shareable token that grants access when redeemed.
 type InviteLink struct {
-	Token     string     `json:"token"`             // Token is the opaque hex string identifying the invite
-	SubjectID int64      `json:"subject_id"`        // SubjectID is the subject the invite grants access to
-	Role      string     `json:"role"`              // Role is the access level conferred by the invite
-	ExpiresAt *time.Time `json:"expires_at"`        // ExpiresAt is the optional invite expiry time (nil = no expiry)
-	CreatedAt time.Time  `json:"created_at"`        // CreatedAt is when the invite was issued
+	Token     string     `json:"token"`      // Token is the opaque hex string identifying the invite
+	SubjectID int64      `json:"subject_id"` // SubjectID is the subject the invite grants access to
+	Role      string     `json:"role"`       // Role is the access level conferred by the invite
+	ExpiresAt *time.Time `json:"expires_at"` // ExpiresAt is the optional invite expiry time (nil = no expiry)
+	CreatedAt time.Time  `json:"created_at"` // CreatedAt is when the invite was issued
 }
 
 // CreateInviteInput captures the fields required to mint a new invite link.

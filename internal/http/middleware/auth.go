@@ -12,7 +12,7 @@ import (
 
 // Auth parses the Bearer token and attaches identity to the request context.
 // Requests without a token are rejected with 401.
-func Auth(s *jwtsigner.Signer, isAdmin func(uid int64) (bool, error)) Middleware {
+func Auth(s *jwtsigner.Signer) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
@@ -25,13 +25,7 @@ func Auth(s *jwtsigner.Signer, isAdmin func(uid int64) (bool, error)) Middleware
 				httpx.WriteError(w, myErrors.ErrUnauthenticated)
 				return
 			}
-			admin := false
-			if isAdmin != nil {
-				if ok, err := isAdmin(claims.UID); err == nil {
-					admin = ok
-				}
-			}
-			ctx := authctx.WithIdentity(r.Context(), claims.UID, claims.EmailVerified, admin)
+			ctx := authctx.WithIdentity(r.Context(), claims.UID, claims.EmailVerified, claims.IsAdmin)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

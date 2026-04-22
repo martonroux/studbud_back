@@ -20,8 +20,8 @@ type errorDetails struct {
 
 // sentinelStatus maps each sentinel error to its HTTP status code.
 var sentinelStatus = []struct {
-	err    error  // err is the sentinel to match via errors.Is
-	status int    // status is the HTTP status code to return
+	err    error // err is the sentinel to match via errors.Is
+	status int   // status is the HTTP status code to return
 }{
 	{myErrors.ErrUnauthenticated, http.StatusUnauthorized},
 	{myErrors.ErrNotVerified, http.StatusForbidden},

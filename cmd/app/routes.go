@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 
 	"studbud/backend/api/handler"
@@ -12,9 +11,7 @@ import (
 func buildRouter(d *deps) http.Handler {
 	mux := http.NewServeMux()
 
-	authMW := middleware.Auth(d.signer, func(uid int64) (bool, error) {
-		return d.user.IsAdmin(context.Background(), uid)
-	})
+	authMW := middleware.Auth(d.signer)
 	verifiedMW := middleware.RequireVerified()
 	auth := wrap(authMW)
 	av := wrap(authMW, verifiedMW)

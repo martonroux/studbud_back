@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -51,7 +52,8 @@ func (s *Service) HasAIAccess(ctx context.Context, uid int64) (bool, error) {
 
 // SubjectLevel resolves the caller's effective access level on a subject.
 // Resolution: owner → collaborator role → friend-of-owner (if visibility='friends')
-//           → subscriber (if visibility='public') → none.
+//
+//	→ subscriber (if visibility='public') → none.
 func (s *Service) SubjectLevel(ctx context.Context, uid, subjectID int64) (Level, error) {
 	lvl, err := s.ownerLevel(ctx, uid, subjectID)
 	if err != nil || lvl != LevelNone {
@@ -68,7 +70,7 @@ func (s *Service) ownerLevel(ctx context.Context, uid, subjectID int64) (Level, 
 	var ownerID int64
 	err := s.db.QueryRow(ctx, `SELECT owner_id FROM subjects WHERE id = $1`, subjectID).Scan(&ownerID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return LevelNone, nil
 		}
 		return LevelNone, fmt.Errorf("load subject owner:\n%w", err)
@@ -84,7 +86,7 @@ func (s *Service) collaboratorLevel(ctx context.Context, uid, subjectID int64) (
 	err := s.db.QueryRow(ctx,
 		`SELECT role FROM collaborators WHERE subject_id = $1 AND user_id = $2`,
 		subjectID, uid).Scan(&role)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return LevelNone, nil
 	}
 	if err != nil {
@@ -102,6 +104,9 @@ func (s *Service) visibilityLevel(ctx context.Context, uid, subjectID int64) (Le
 	err := s.db.QueryRow(ctx,
 		`SELECT visibility, owner_id FROM subjects WHERE id = $1`,
 		subjectID).Scan(&visibility, &ownerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LevelNone, nil
+	}
 	if err != nil {
 		return LevelNone, fmt.Errorf("load subject visibility:\n%w", err)
 	}
