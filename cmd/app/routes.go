@@ -16,11 +16,14 @@ func buildRouter(d *deps) http.Handler {
 		return d.user.IsAdmin(context.Background(), uid)
 	})
 	verifiedMW := middleware.RequireVerified()
+	auth := wrap(authMW)
+	av := wrap(authMW, verifiedMW)
 
 	registerPublicRoutes(mux, d)
-	registerAuthRoutes(mux, d, authMW)
-	registerVerifiedRoutes(mux, d, authMW, verifiedMW)
-	registerStubRoutes(mux, d, authMW, verifiedMW)
+	registerAuthReadRoutes(mux, d, auth)
+	registerAuthSocialRoutes(mux, d, auth)
+	registerVerifiedRoutes(mux, d, av)
+	registerStubRoutes(mux, d, av)
 
 	stack := middleware.Chain(
 		middleware.Recoverer(),
@@ -29,6 +32,12 @@ func buildRouter(d *deps) http.Handler {
 		middleware.Logger(),
 	)
 	return stack(mux)
+}
+
+// wrap returns a helper that attaches the given middlewares (outer→inner) to a HandlerFunc.
+func wrap(mws ...middleware.Middleware) func(http.HandlerFunc) http.Handler {
+	m := middleware.Chain(mws...)
+	return func(h http.HandlerFunc) http.Handler { return m(h) }
 }
 
 // registerPublicRoutes attaches routes that require no authentication.
@@ -45,22 +54,14 @@ func registerPublicRoutes(mux *http.ServeMux, d *deps) {
 	mux.HandleFunc("POST /billing/webhook", billH.Webhook)
 }
 
-// registerAuthRoutes attaches routes that require authentication but not email verification.
-func registerAuthRoutes(mux *http.ServeMux, d *deps, authMW middleware.Middleware) {
+// registerAuthReadRoutes attaches authenticated read / query routes (no email-verification gate).
+func registerAuthReadRoutes(mux *http.ServeMux, d *deps, auth func(http.HandlerFunc) http.Handler) {
 	userH := handler.NewUserHandler(d.user, d.emailVer)
 	emailVerH := handler.NewEmailVerificationHandler(d.emailVer, d.user)
 	subjH := handler.NewSubjectHandler(d.subject)
 	chapH := handler.NewChapterHandler(d.chapter)
 	fcH := handler.NewFlashcardHandler(d.flashcard)
 	searchH := handler.NewSearchHandler(d.search)
-	friendH := handler.NewFriendshipHandler(d.friendship)
-	subsH := handler.NewSubjectSubscriptionHandler(d.subjectSub)
-	collabH := handler.NewCollaborationHandler(d.collab)
-	prefH := handler.NewPreferencesHandler(d.preferences)
-	gamH := handler.NewGamificationHandler(d.gamification)
-	billH := handler.NewBillingHandler(d.billing)
-
-	auth := func(h http.HandlerFunc) http.Handler { return authMW(http.HandlerFunc(h)) }
 
 	mux.Handle("POST /user-test-jwt", auth(userH.TestJWT))
 	mux.Handle("POST /resend-verification", auth(emailVerH.Resend))
@@ -72,6 +73,17 @@ func registerAuthRoutes(mux *http.ServeMux, d *deps, authMW middleware.Middlewar
 	mux.Handle("POST /flashcard-review", auth(fcH.Review))
 	mux.Handle("GET /search/subjects", auth(searchH.Subjects))
 	mux.Handle("GET /search/users", auth(searchH.Users))
+}
+
+// registerAuthSocialRoutes attaches authenticated social, settings, and billing routes.
+func registerAuthSocialRoutes(mux *http.ServeMux, d *deps, auth func(http.HandlerFunc) http.Handler) {
+	friendH := handler.NewFriendshipHandler(d.friendship)
+	subsH := handler.NewSubjectSubscriptionHandler(d.subjectSub)
+	collabH := handler.NewCollaborationHandler(d.collab)
+	prefH := handler.NewPreferencesHandler(d.preferences)
+	gamH := handler.NewGamificationHandler(d.gamification)
+	billH := handler.NewBillingHandler(d.billing)
+
 	mux.Handle("POST /friendship-accept", auth(friendH.Accept))
 	mux.Handle("POST /friendship-decline", auth(friendH.Decline))
 	mux.Handle("POST /friendship-unfriend", auth(friendH.Unfriend))
@@ -92,7 +104,7 @@ func registerAuthRoutes(mux *http.ServeMux, d *deps, authMW middleware.Middlewar
 }
 
 // registerVerifiedRoutes attaches routes that require authentication and email verification.
-func registerVerifiedRoutes(mux *http.ServeMux, d *deps, authMW, verifiedMW middleware.Middleware) {
+func registerVerifiedRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFunc) http.Handler) {
 	userH := handler.NewUserHandler(d.user, d.emailVer)
 	imgH := handler.NewImageHandler(d.image)
 	subjH := handler.NewSubjectHandler(d.subject)
@@ -100,8 +112,6 @@ func registerVerifiedRoutes(mux *http.ServeMux, d *deps, authMW, verifiedMW midd
 	fcH := handler.NewFlashcardHandler(d.flashcard)
 	friendH := handler.NewFriendshipHandler(d.friendship)
 	collabH := handler.NewCollaborationHandler(d.collab)
-
-	av := func(h http.HandlerFunc) http.Handler { return authMW(verifiedMW(http.HandlerFunc(h))) }
 
 	mux.Handle("POST /set-profile-picture", av(userH.SetProfilePicture))
 	mux.Handle("GET /get-user-stats", av(userH.Stats))
@@ -124,13 +134,11 @@ func registerVerifiedRoutes(mux *http.ServeMux, d *deps, authMW, verifiedMW midd
 }
 
 // registerStubRoutes attaches AI, quiz, plan, and duel stub routes (auth + verified).
-func registerStubRoutes(mux *http.ServeMux, d *deps, authMW, verifiedMW middleware.Middleware) {
+func registerStubRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFunc) http.Handler) {
 	aiH := handler.NewAIHandler(d.ai)
 	quizH := handler.NewQuizHandler(d.quiz)
 	planH := handler.NewPlanHandler(d.plan)
 	duelH := handler.NewDuelHandler(d.duel)
-
-	av := func(h http.HandlerFunc) http.Handler { return authMW(verifiedMW(http.HandlerFunc(h))) }
 
 	mux.Handle("POST /ai/flashcards/prompt", av(aiH.GenerateFromPrompt))
 	mux.Handle("POST /ai/flashcards/pdf", av(aiH.GenerateFromPDF))
