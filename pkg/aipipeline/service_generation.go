@@ -124,7 +124,8 @@ func (s *Service) streamOnce(ctx context.Context, req AIRequest, jobID int64, ou
 		FeatureKey: string(req.Feature),
 		Model:      s.model,
 		Prompt:     req.Prompt,
-		PDFBytes:   req.PDFBytes,
+		Schema:     req.Schema,
+		MaxTokens:  4096,
 	})
 	if err != nil {
 		return streamResult{err: classifyProviderStartErr(err)}
