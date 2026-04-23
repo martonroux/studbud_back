@@ -61,6 +61,14 @@ CREATE TABLE IF NOT EXISTS flashcard_keywords (
     PRIMARY KEY (flashcard_id, keyword)
 );
 CREATE INDEX IF NOT EXISTS idx_flashcard_keywords_kw ON flashcard_keywords(keyword);
+
+ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS subject_id      BIGINT NULL REFERENCES subjects(id)   ON DELETE SET NULL;
+ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS flashcard_id    BIGINT NULL REFERENCES flashcards(id) ON DELETE SET NULL;
+ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS pdf_page_count  INT    NOT NULL DEFAULT 0;
+ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS items_emitted   INT    NOT NULL DEFAULT 0;
+ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS items_dropped   INT    NOT NULL DEFAULT 0;
+ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS error_kind      TEXT   NULL;
+CREATE INDEX IF NOT EXISTS idx_ai_jobs_user_running ON ai_jobs(user_id) WHERE status = 'running';
 `
 
 func setupAI(ctx context.Context, pool *pgxpool.Pool) error {

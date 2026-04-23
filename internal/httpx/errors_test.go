@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -47,5 +48,18 @@ func TestWriteErrorAppErrorOverridesStatus(t *testing.T) {
 	WriteError(rec, &myErrors.AppError{Code: "x", Message: "y", Status: 418, Wrapped: myErrors.ErrValidation})
 	if rec.Code != 418 {
 		t.Fatalf("status = %d, want 418", rec.Code)
+	}
+}
+
+func TestWriteError_ContentPolicy(t *testing.T) {
+	rec := httptest.NewRecorder()
+	WriteError(rec, myErrors.ErrContentPolicy)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", rec.Code)
+	}
+	var body struct{ Error struct{ Code string } }
+	_ = json.NewDecoder(rec.Body).Decode(&body)
+	if body.Error.Code != "content_policy" {
+		t.Errorf("code = %q, want content_policy", body.Error.Code)
 	}
 }

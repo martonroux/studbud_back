@@ -37,6 +37,7 @@ var sentinelStatus = []struct {
 	{myErrors.ErrPdfTooLarge, http.StatusTooManyRequests},
 	{myErrors.ErrAIProvider, http.StatusBadGateway},
 	{myErrors.ErrStripe, http.StatusBadGateway},
+	{myErrors.ErrContentPolicy, http.StatusUnprocessableEntity},
 	{myErrors.ErrNotImplemented, http.StatusNotImplemented},
 }
 
@@ -59,6 +60,7 @@ var sentinelCodes = []struct {
 	{myErrors.ErrPdfTooLarge, "pdf_too_large"},
 	{myErrors.ErrAIProvider, "ai_provider_error"},
 	{myErrors.ErrStripe, "stripe_error"},
+	{myErrors.ErrContentPolicy, "content_policy"},
 	{myErrors.ErrNotImplemented, "not_implemented"},
 }
 

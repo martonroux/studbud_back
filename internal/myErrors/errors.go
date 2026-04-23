@@ -47,6 +47,9 @@ var ErrAIProvider = errors.New("ai provider error")
 // ErrStripe indicates an upstream Stripe failure.
 var ErrStripe = errors.New("stripe error")
 
+// ErrContentPolicy indicates the provider refused to answer on content-policy grounds.
+var ErrContentPolicy = errors.New("ai content policy refusal")
+
 // ErrNotImplemented indicates a route exists but its feature is not yet implemented.
 var ErrNotImplemented = errors.New("not implemented")
 
