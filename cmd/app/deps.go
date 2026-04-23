@@ -125,7 +125,7 @@ func buildInfra(cfg *config.Config, pool *pgxpool.Pool) (infra, error) {
 		emailer:   buildEmailer(cfg),
 		scheduler: cron.New(),
 		worker:    keywordWorker.New(),
-		aiClient:  aiProvider.NoopClient{},
+		aiClient:  selectAIClient(cfg),
 		billing:   billingadapter.NoopClient{},
 		hub:       duelHub.New(),
 	}, nil
@@ -215,4 +215,13 @@ func assembleDeps(cfg *config.Config, pool *pgxpool.Pool, inf infra, dom domainS
 		duel:         stubs.duel,
 		billing:      stubs.billing,
 	}
+}
+
+// selectAIClient returns the real ClaudeProvider when an API key is configured
+// and the environment is not "test"; otherwise the NoopClient.
+func selectAIClient(cfg *config.Config) aiProvider.Client {
+	if cfg.Env == "test" || cfg.AnthropicAPIKey == "" {
+		return aiProvider.NoopClient{}
+	}
+	return aiProvider.NewClaudeProvider("https://api.anthropic.com", cfg.AnthropicAPIKey)
 }

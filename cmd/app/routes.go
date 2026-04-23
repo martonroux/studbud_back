@@ -145,6 +145,7 @@ func registerStubRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFunc) h
 	mux.Handle("POST /ai/flashcards/prompt", av(aiH.GenerateFromPrompt))
 	mux.Handle("POST /ai/flashcards/pdf", av(aiH.GenerateFromPDF))
 	mux.Handle("POST /ai/check", av(aiH.Check))
+	mux.Handle("POST /ai/commit-generation", av(aiH.CommitGeneration))
 	mux.Handle("POST /quiz/generate", av(quizH.Generate))
 	mux.Handle("POST /quiz/attempt", av(quizH.Attempt))
 	mux.Handle("POST /quiz/share", av(quizH.Share))
