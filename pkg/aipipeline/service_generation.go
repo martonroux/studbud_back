@@ -97,12 +97,15 @@ func (s *Service) insertJob(ctx context.Context, req AIRequest) (int64, error) {
 	return jobID, nil
 }
 
-// drive runs the provider stream, parses incoming JSON into array elements,
-// emits ChunkItem / ChunkDone / ChunkError, and finalizes the ai_jobs row.
+// drive runs the provider stream (with one transparent retry on transport
+// transients), parses JSON, emits chunks, and finalizes the ai_jobs row.
 func (s *Service) drive(ctx context.Context, req AIRequest, jobID int64, out chan<- AIChunk) {
 	defer close(out)
-	result := s.streamOnce(ctx, req, jobID, out)
-	s.finalize(ctx, jobID, req, result, out)
+	r := s.streamOnce(ctx, req, jobID, out)
+	if r.err != nil && retryable(r.err) {
+		r = s.streamOnce(ctx, req, jobID, out)
+	}
+	s.finalize(ctx, jobID, req, r, out)
 }
 
 // streamResult aggregates what happened during one provider stream.

@@ -57,6 +57,21 @@ func statusFor(err error) string {
 	return "failed"
 }
 
+// retryable reports whether a synchronous provider-start error is worth one
+// transparent retry. Only transport transients qualify (5xx / timeout / 429).
+// Content-policy refusals, 4xx, and malformed output are terminal.
+func retryable(err error) bool {
+	var ae *myErrors.AppError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	switch ae.Code {
+	case "provider_5xx", "provider_timeout", "provider_rate_limit":
+		return true
+	}
+	return false
+}
+
 // isWellFormedObject returns true when b parses as a JSON object.
 // Used to drop garbled items without aborting the stream.
 func isWellFormedObject(b []byte) bool {

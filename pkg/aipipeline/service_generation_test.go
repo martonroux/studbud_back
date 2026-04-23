@@ -203,3 +203,87 @@ func TestRun_DropsSchemaInvalidItems(t *testing.T) {
 	}
 	_ = dropped
 }
+
+func TestRun_RetriesOnceOnTransientProviderError(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	cli := &testutil.FakeAIClient{
+		Err:        &myErrors.AppError{Code: "provider_5xx", Wrapped: myErrors.ErrAIProvider},
+		FailFirstN: 1,
+		Chunks: []aiProvider.Chunk{
+			{Text: `{"items":[{"title":"ok","question":"q","answer":"a"}]}`, Done: true},
+		},
+	}
+	svc := newPipelineSvc(pool, cli)
+	ch, _, err := svc.RunStructuredGeneration(context.Background(), newPromptReq(u.ID, subj.ID))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for range ch {
+	}
+	if cli.Calls() != 2 {
+		t.Errorf("calls = %d, want 2 (one failure + one retry)", cli.Calls())
+	}
+}
+
+func TestRun_DoesNotRetryOnContentPolicy(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	cli := &testutil.FakeAIClient{
+		Err:        myErrors.ErrContentPolicy,
+		FailFirstN: 5,
+	}
+	svc := newPipelineSvc(pool, cli)
+	ch, _, err := svc.RunStructuredGeneration(context.Background(), newPromptReq(u.ID, subj.ID))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var sawError bool
+	for c := range ch {
+		if c.Kind == aipipeline.ChunkError {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Error("expected ChunkError")
+	}
+	if cli.Calls() != 1 {
+		t.Errorf("calls = %d, want 1 (no retry on content_policy)", cli.Calls())
+	}
+}
+
+func TestRun_FailsAfterRetryExhausts(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	cli := &testutil.FakeAIClient{
+		Err:        &myErrors.AppError{Code: "provider_5xx", Wrapped: myErrors.ErrAIProvider},
+		FailFirstN: 10,
+	}
+	svc := newPipelineSvc(pool, cli)
+	ch, jobID, err := svc.RunStructuredGeneration(context.Background(), newPromptReq(u.ID, subj.ID))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for range ch {
+	}
+	if cli.Calls() != 2 {
+		t.Errorf("calls = %d, want 2", cli.Calls())
+	}
+	var status, errKind string
+	_ = pool.QueryRow(context.Background(), `SELECT status, error_kind FROM ai_jobs WHERE id=$1`, jobID).Scan(&status, &errKind)
+	if status != "failed" || errKind != "provider_5xx" {
+		t.Errorf("row = (%q, %q), want (failed, provider_5xx)", status, errKind)
+	}
+}
