@@ -36,7 +36,7 @@ paths:
     post:
       tags: [Auth & User]
       summary: Register a new user
-      description: Creates an account, issues a verification email, returns a JWT with `email_verified: false`.
+      description: "Creates an account, issues a verification email, returns a JWT with `email_verified: false`."
       security: []
       requestBody:
         required: true
