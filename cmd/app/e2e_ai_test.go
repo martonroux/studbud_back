@@ -11,17 +11,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"studbud/backend/internal/aiProvider"
 	"studbud/backend/internal/config"
 	jwtsigner "studbud/backend/internal/jwt"
 	"studbud/backend/testutil"
 )
 
-// TestE2E_AIHappyPath walks through: admin grant → generate (SSE) → commit → quota reflects debit.
+// aiE2ECtx holds the wired server + tokens + identities for one e2e run.
+type aiE2ECtx struct {
+	pool     *pgxpool.Pool    // pool is the shared DB pool
+	srv      *httptest.Server // srv is the wired backend under test
+	cfg      *config.Config   // cfg is the test-configured config
+	adminTok string           // adminTok is a JWT for the admin user
+	userTok  string           // userTok is a JWT for the comp-grant target user
+	userID   int64            // userID is the target user id
+	subjID   int64            // subjID is the target subject id
+}
+
+// TestE2E_AIHappyPath orchestrates: admin grant → SSE generate → commit → quota + DB verify.
 func TestE2E_AIHappyPath(t *testing.T) {
+	ctx := setupAIE2E(t)
+	defer ctx.srv.Close()
+
+	e2eAdminGrant(t, ctx)
+	jobID := e2eGenerateAndAssertStream(t, ctx)
+	e2eCommit(t, ctx, jobID)
+	e2eAssertQuotaAndDB(t, ctx)
+}
+
+// setupAIE2E wires deps with a fake AI client and returns a ready e2e context.
+func setupAIE2E(t *testing.T) *aiE2ECtx {
 	pool := testutil.OpenTestDB(t)
 	testutil.Reset(t, pool)
-
 	admin := testutil.NewVerifiedUser(t, pool)
 	testutil.MakeAdmin(t, pool, admin.ID)
 	user := testutil.NewVerifiedUser(t, pool)
@@ -34,65 +57,114 @@ func TestE2E_AIHappyPath(t *testing.T) {
 		SMTPHost: "x", SMTPPort: "1", SMTPFrom: "x@x",
 		UploadDir: t.TempDir(), AIModel: "test-model", StripeMode: "test",
 	}
-	d, cleanup := mustBuildDepsWithFake(t, pool, cfg, &testutil.FakeAIClient{
+	d, _ := mustBuildDepsWithFake(t, pool, cfg, &testutil.FakeAIClient{
 		Chunks: []aiProvider.Chunk{
 			{Text: `{"items":[{"title":"t1","question":"q1","answer":"a1"}]}`, Done: true},
 		},
 	})
-	defer cleanup()
-	router := buildRouter(d)
-	srv := httptest.NewServer(router)
-	defer srv.Close()
-
-	adminTok := mintE2EToken(t, cfg, admin.ID, true, true)
-	userTok := mintE2EToken(t, cfg, user.ID, true, false)
-
-	grantBody, _ := json.Marshal(map[string]any{"user_id": user.ID, "active": true})
-	adminResp := aiDo(t, srv, "POST", "/admin/grant-ai-access", adminTok, bytes.NewReader(grantBody), "application/json")
-	if adminResp.StatusCode != http.StatusOK {
-		t.Fatalf("grant status = %d", adminResp.StatusCode)
+	return &aiE2ECtx{
+		pool:     pool,
+		srv:      httptest.NewServer(buildRouter(d)),
+		cfg:      cfg,
+		adminTok: mintE2EToken(t, cfg, admin.ID, true, true),
+		userTok:  mintE2EToken(t, cfg, user.ID, true, false),
+		userID:   user.ID,
+		subjID:   subj.ID,
 	}
+}
 
-	genBody, _ := json.Marshal(map[string]any{
-		"subject_id": subj.ID, "prompt": "explain X", "style": "standard",
+// e2eAdminGrant POSTs /admin/grant-ai-access and asserts HTTP 200.
+func e2eAdminGrant(t *testing.T, c *aiE2ECtx) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"user_id": c.userID, "active": true})
+	if err != nil {
+		t.Fatalf("marshal grant: %v", err)
+	}
+	resp := aiDo(t, c.srv, "POST", "/admin/grant-ai-access", c.adminTok, bytes.NewReader(body), "application/json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("grant status = %d", resp.StatusCode)
+	}
+}
+
+// e2eGenerateAndAssertStream POSTs /ai/flashcards/prompt, asserts SSE events, returns the parsed jobId.
+func e2eGenerateAndAssertStream(t *testing.T, c *aiE2ECtx) int64 {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"subject_id": c.subjID, "prompt": "explain X", "style": "standard",
 	})
-	genResp := aiDo(t, srv, "POST", "/ai/flashcards/prompt", userTok, bytes.NewReader(genBody), "application/json")
-	if genResp.StatusCode != http.StatusOK {
-		t.Fatalf("generate status = %d", genResp.StatusCode)
+	if err != nil {
+		t.Fatalf("marshal gen: %v", err)
 	}
-	body, _ := io.ReadAll(genResp.Body)
-	_ = genResp.Body.Close()
-	stream := string(body)
+	resp := aiDo(t, c.srv, "POST", "/ai/flashcards/prompt", c.userTok, bytes.NewReader(body), "application/json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("generate status = %d", resp.StatusCode)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	stream := string(raw)
 	for _, want := range []string{"event: job", "event: card", "event: done"} {
 		if !strings.Contains(stream, want) {
 			t.Errorf("missing %q in stream:\n%s", want, stream)
 		}
 	}
+	return parseJobIDFromStream(t, stream)
+}
 
-	commitBody, _ := json.Marshal(map[string]any{
-		"job_id": 1, "subject_id": subj.ID,
+// parseJobIDFromStream extracts jobId from the first `event: job` SSE event.
+func parseJobIDFromStream(t *testing.T, stream string) int64 {
+	t.Helper()
+	lines := strings.Split(stream, "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "event: job") || i+1 >= len(lines) {
+			continue
+		}
+		payload := strings.TrimPrefix(lines[i+1], "data: ")
+		var env struct {
+			JobID int64 `json:"jobId"`
+		}
+		if err := json.Unmarshal([]byte(payload), &env); err == nil {
+			return env.JobID
+		}
+	}
+	t.Fatalf("no jobId in stream:\n%s", stream)
+	return 0
+}
+
+// e2eCommit POSTs /ai/commit-generation with one loose card and asserts HTTP 200.
+func e2eCommit(t *testing.T, c *aiE2ECtx, jobID int64) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"job_id": jobID, "subject_id": c.subjID,
 		"chapters": []any{},
 		"cards": []any{
 			map[string]any{"chapterClientId": "", "title": "t1", "question": "q1", "answer": "a1"},
 		},
 	})
-	commitResp := aiDo(t, srv, "POST", "/ai/commit-generation", userTok, bytes.NewReader(commitBody), "application/json")
-	if commitResp.StatusCode != http.StatusOK {
-		t.Fatalf("commit status = %d", commitResp.StatusCode)
+	if err != nil {
+		t.Fatalf("marshal commit: %v", err)
 	}
+	resp := aiDo(t, c.srv, "POST", "/ai/commit-generation", c.userTok, bytes.NewReader(body), "application/json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("commit status = %d", resp.StatusCode)
+	}
+}
 
-	quotaResp := aiDo(t, srv, "GET", "/ai/quota", userTok, nil, "")
-	if quotaResp.StatusCode != http.StatusOK {
-		t.Fatalf("quota status = %d", quotaResp.StatusCode)
+// e2eAssertQuotaAndDB asserts /ai/quota shows aiAccess=true and flashcards row has source='ai'.
+func e2eAssertQuotaAndDB(t *testing.T, c *aiE2ECtx) {
+	t.Helper()
+	resp := aiDo(t, c.srv, "GET", "/ai/quota", c.userTok, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("quota status = %d", resp.StatusCode)
 	}
 	var quota map[string]any
-	_ = json.NewDecoder(quotaResp.Body).Decode(&quota)
+	if err := json.NewDecoder(resp.Body).Decode(&quota); err != nil {
+		t.Fatalf("decode quota: %v", err)
+	}
 	if quota["aiAccess"] != true {
 		t.Error("aiAccess = false after grant")
 	}
-
 	var count int
-	_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM flashcards WHERE subject_id=$1 AND source='ai'`, subj.ID).Scan(&count)
+	_ = c.pool.QueryRow(context.Background(), `SELECT count(*) FROM flashcards WHERE subject_id=$1 AND source='ai'`, c.subjID).Scan(&count)
 	if count != 1 {
 		t.Errorf("flashcards source=ai count = %d, want 1", count)
 	}
