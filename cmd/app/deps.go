@@ -225,3 +225,23 @@ func selectAIClient(cfg *config.Config) aiProvider.Client {
 	}
 	return aiProvider.NewClaudeProvider("https://api.anthropic.com", cfg.AnthropicAPIKey)
 }
+
+// TestingT is the minimal testing.T surface this helper uses.
+// Defined here so the helper can be exported without importing "testing" in prod builds.
+type TestingT interface {
+	Fatalf(format string, args ...any)
+}
+
+// mustBuildDepsWithFake builds deps with a provided AI client, intended for tests.
+// Unit tests import this to avoid real HTTP to Anthropic.
+func mustBuildDepsWithFake(t TestingT, pool *pgxpool.Pool, cfg *config.Config, fake aiProvider.Client) (*deps, func()) {
+	inf, err := buildInfra(cfg, pool)
+	if err != nil {
+		t.Fatalf("buildInfra: %v", err)
+	}
+	inf.aiClient = fake
+	dom := buildDomainServices(cfg, pool, inf)
+	stubs := buildStubServices(cfg, pool, inf, dom.access)
+	d := assembleDeps(cfg, pool, inf, dom, stubs)
+	return d, func() {}
+}

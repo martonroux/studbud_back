@@ -287,3 +287,37 @@ func TestRun_FailsAfterRetryExhausts(t *testing.T) {
 		t.Errorf("row = (%q, %q), want (failed, provider_5xx)", status, errKind)
 	}
 }
+
+func TestRun_MalformedOutputNoTransparentRetry(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	cli := &testutil.FakeAIClient{
+		Chunks: []aiProvider.Chunk{
+			{Text: "totally not json", Done: true},
+		},
+	}
+	svc := newPipelineSvc(pool, cli)
+	ch, jobID, err := svc.RunStructuredGeneration(context.Background(), newPromptReq(u.ID, subj.ID))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for range ch {
+	}
+	if cli.Calls() != 1 {
+		t.Errorf("calls = %d, want 1 (no transparent retry on junk stream output)", cli.Calls())
+	}
+	var prompt int
+	_ = pool.QueryRow(context.Background(), `SELECT prompt_calls FROM ai_quota_daily WHERE user_id=$1 AND day=current_date`, u.ID).Scan(&prompt)
+	if prompt != 0 {
+		t.Errorf("prompt_calls = %d, want 0 (no debit on empty items)", prompt)
+	}
+	var emitted int
+	_ = pool.QueryRow(context.Background(), `SELECT items_emitted FROM ai_jobs WHERE id=$1`, jobID).Scan(&emitted)
+	if emitted != 0 {
+		t.Errorf("emitted = %d, want 0", emitted)
+	}
+}
