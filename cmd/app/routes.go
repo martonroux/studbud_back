@@ -47,11 +47,15 @@ func registerPublicRoutes(mux *http.ServeMux, d *deps) {
 	imgH := handler.NewImageHandler(d.image)
 	billH := handler.NewBillingHandler(d.billing)
 
+	docsH := handler.NewDocsHandler()
+
 	mux.HandleFunc("POST /user-register", userH.Register)
 	mux.HandleFunc("POST /user-login", userH.Login)
 	mux.HandleFunc("GET /verify-email", emailVerH.Verify)
 	mux.HandleFunc("GET /images/{id}", imgH.Serve)
 	mux.HandleFunc("POST /billing/webhook", billH.Webhook)
+	mux.HandleFunc("GET /docs", docsH.UI)
+	mux.HandleFunc("GET /openapi.yaml", docsH.Spec)
 }
 
 // registerAuthReadRoutes attaches authenticated read / query routes (no email-verification gate).

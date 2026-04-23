@@ -1,0 +1,1328 @@
+openapi: 3.1.0
+info:
+  title: StudBud Backend API
+  description: |
+    HTTP API for the StudBud study-aid backend.
+
+    **Scope:** only implemented routes are documented. Stub routes (quiz, plan, duel, billing checkout/portal/webhook) are omitted until their specs ship.
+
+    **Auth:** most routes require a JWT bearer token. Use `POST /user-register` or `POST /user-login` to obtain one, then click **Authorize** in Swagger UI and paste the token (without the `Bearer ` prefix).
+
+    **Email-verification gate:** routes tagged "auth+verified" reject tokens where `email_verified: false` with HTTP 403 `email_not_verified`. After verifying, re-login to obtain a fresh JWT.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local dev
+tags:
+  - name: Auth & User
+  - name: Subjects
+  - name: Chapters
+  - name: Flashcards
+  - name: Search
+  - name: Friendships
+  - name: Subscriptions
+  - name: Collaboration
+  - name: Images
+  - name: Preferences
+  - name: Gamification
+  - name: AI
+  - name: Admin
+
+security:
+  - BearerAuth: []
+
+paths:
+  /user-register:
+    post:
+      tags: [Auth & User]
+      summary: Register a new user
+      description: Creates an account, issues a verification email, returns a JWT with `email_verified: false`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterInput'
+      responses:
+        '200':
+          description: JWT for the new user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /user-login:
+    post:
+      tags: [Auth & User]
+      summary: Log in
+      description: Authenticates and returns a JWT reflecting current `email_verified` state.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginInput'
+      responses:
+        '200':
+          description: JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /verify-email:
+    get:
+      tags: [Auth & User]
+      summary: Verify email
+      description: Consumes a one-shot verification token. Re-login after this call to get a new JWT.
+      security: []
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Verified
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /images/{id}:
+    get:
+      tags: [Images]
+      summary: Serve image bytes
+      description: Streams image content. Public — id is an opaque capability.
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Image bytes
+          content:
+            image/*: { schema: { type: string, format: binary } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /user-test-jwt:
+    post:
+      tags: [Auth & User]
+      summary: Validate JWT
+      responses:
+        '201': { description: Token valid }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /resend-verification:
+    post:
+      tags: [Auth & User]
+      summary: Resend verification email
+      description: Throttled to 1 request / 60 s / user.
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /set-profile-picture:
+    post:
+      tags: [Auth & User]
+      summary: Set profile picture (verified)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image_id]
+              properties:
+                image_id: { type: string }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+
+  /get-user-stats:
+    get:
+      tags: [Gamification]
+      summary: Aggregate user stats (verified, camelCase)
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AggregateStats' }
+
+  /upload-image:
+    post:
+      tags: [Images]
+      summary: Upload image (verified)
+      description: Multipart upload. 5 MiB form cap, 6 MiB hard cap.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Image id + URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Image' }
+
+  /delete-image:
+    post:
+      tags: [Images]
+      summary: Delete image (verified)
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted }
+
+  /subject-list:
+    get:
+      tags: [Subjects]
+      summary: List owned subjects
+      parameters:
+        - in: query
+          name: archived
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Subjects
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Subject' } }
+
+  /subject:
+    get:
+      tags: [Subjects]
+      summary: Get a subject
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Subject
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subject' }
+
+  /subject-create:
+    post:
+      tags: [Subjects]
+      summary: Create subject (verified)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubjectCreateInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subject' }
+
+  /subject-update:
+    post:
+      tags: [Subjects]
+      summary: Update subject (verified, owner only)
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubjectUpdateInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subject' }
+
+  /subject-delete:
+    post:
+      tags: [Subjects]
+      summary: Delete subject (verified, owner only)
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Deleted }
+
+  /chapter-list:
+    get:
+      tags: [Chapters]
+      summary: List chapters of a subject
+      parameters:
+        - in: query
+          name: subject_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Chapters
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Chapter' } }
+
+  /chapter-create:
+    post:
+      tags: [Chapters]
+      summary: Create chapter (verified, editor+)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_id, title]
+              properties:
+                subject_id: { type: integer, format: int64 }
+                title: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Chapter' }
+
+  /chapter-update:
+    post:
+      tags: [Chapters]
+      summary: Update chapter (verified, editor+)
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                position: { type: integer }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Chapter' }
+
+  /chapter-delete:
+    post:
+      tags: [Chapters]
+      summary: Delete chapter (verified, editor+)
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Deleted }
+
+  /flashcard-list:
+    get:
+      tags: [Flashcards]
+      summary: List flashcards of a subject
+      parameters:
+        - in: query
+          name: subject_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Flashcards
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Flashcard' } }
+
+  /flashcard:
+    get:
+      tags: [Flashcards]
+      summary: Get a flashcard
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Flashcard
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Flashcard' }
+
+  /flashcard-create:
+    post:
+      tags: [Flashcards]
+      summary: Create flashcard (verified, editor+)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FlashcardCreateInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Flashcard' }
+
+  /flashcard-update:
+    post:
+      tags: [Flashcards]
+      summary: Update flashcard (verified, editor+)
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FlashcardUpdateInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Flashcard' }
+
+  /flashcard-delete:
+    post:
+      tags: [Flashcards]
+      summary: Delete flashcard (verified, editor+)
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Deleted }
+
+  /flashcard-review:
+    post:
+      tags: [Flashcards]
+      summary: Record a flashcard review result
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result]
+              properties:
+                result: { type: integer, enum: [0, 1, 2], description: "0=bad, 1=ok, 2=good" }
+      responses:
+        '200':
+          description: Updated card
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Flashcard' }
+
+  /search/subjects:
+    get:
+      tags: [Search]
+      summary: Search subjects visible to the caller
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Up to 20 results
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+
+  /search/users:
+    get:
+      tags: [Search]
+      summary: Search users
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Up to 20 results
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+
+  /friendship-request:
+    post:
+      tags: [Friendships]
+      summary: Send friend request (verified)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiver_id]
+              properties:
+                receiver_id: { type: integer, format: int64 }
+      responses:
+        '201':
+          description: Pending friendship
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Friendship' }
+
+  /friendship-accept:
+    post:
+      tags: [Friendships]
+      summary: Accept friend request
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Friendship' }
+
+  /friendship-decline:
+    post:
+      tags: [Friendships]
+      summary: Decline friend request
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Declined
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Friendship' }
+
+  /friendship-unfriend:
+    post:
+      tags: [Friendships]
+      summary: Unfriend
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Unfriended }
+
+  /friendship-list:
+    get:
+      tags: [Friendships]
+      summary: List accepted friendships
+      responses:
+        '200':
+          description: Friendships
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Friendship' } }
+
+  /friendship-pending:
+    get:
+      tags: [Friendships]
+      summary: List pending incoming requests
+      responses:
+        '200':
+          description: Friendships
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Friendship' } }
+
+  /subject-subscribe:
+    post:
+      tags: [Subscriptions]
+      summary: Subscribe to a public subject
+      parameters:
+        - in: query
+          name: subject_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Subscribed }
+
+  /subject-unsubscribe:
+    post:
+      tags: [Subscriptions]
+      summary: Unsubscribe
+      parameters:
+        - in: query
+          name: subject_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Unsubscribed }
+
+  /subject-subscriptions:
+    get:
+      tags: [Subscriptions]
+      summary: List subject IDs I subscribe to
+      responses:
+        '200':
+          description: IDs
+          content:
+            application/json:
+              schema: { type: array, items: { type: integer, format: int64 } }
+
+  /collaborators:
+    get:
+      tags: [Collaboration]
+      summary: List collaborators on a subject
+      parameters:
+        - in: query
+          name: subject_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Collaborators
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Collaborator' } }
+    post:
+      tags: [Collaboration]
+      summary: Add collaborator (verified, owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_id, user_id, role]
+              properties:
+                subject_id: { type: integer, format: int64 }
+                user_id: { type: integer, format: int64 }
+                role: { type: string, enum: [viewer, editor] }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collaborator' }
+
+  /collaborator-remove:
+    post:
+      tags: [Collaboration]
+      summary: Remove collaborator (verified, owner only)
+      parameters:
+        - in: query
+          name: subject_id
+          required: true
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: user_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: Removed }
+
+  /collaboration-invites:
+    post:
+      tags: [Collaboration]
+      summary: Create invite link (verified, owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_id, role]
+              properties:
+                subject_id: { type: integer, format: int64 }
+                role: { type: string, enum: [viewer, editor] }
+                ttl_hours: { type: integer, description: "0 or negative means no expiry" }
+      responses:
+        '201':
+          description: Invite
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InviteLink' }
+
+  /collaboration-invite-redeem:
+    post:
+      tags: [Collaboration]
+      summary: Redeem invite link (verified)
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Collaborator row granted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collaborator' }
+
+  /preferences:
+    get:
+      tags: [Preferences]
+      summary: Get user preferences
+      responses:
+        '200':
+          description: Prefs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Prefs' }
+
+  /preferences-update:
+    post:
+      tags: [Preferences]
+      summary: Update preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ai_planning_enabled: { type: boolean, nullable: true }
+                daily_goal_target: { type: integer, nullable: true }
+      responses:
+        '200':
+          description: Updated prefs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Prefs' }
+
+  /gamification-state:
+    get:
+      tags: [Gamification]
+      summary: Streak + daily goal snapshot
+      responses:
+        '200':
+          description: State
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  streak: { $ref: '#/components/schemas/Streak' }
+                  daily_goal: { $ref: '#/components/schemas/DailyGoal' }
+
+  /training-session-record:
+    post:
+      tags: [Gamification]
+      summary: Record a training session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_id, card_count, duration_ms, score]
+              properties:
+                subject_id: { type: integer, format: int64 }
+                card_count: { type: integer }
+                duration_ms: { type: integer }
+                score: { type: integer }
+      responses:
+        '200':
+          description: Session + streak + daily goal + newly-awarded badges
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { $ref: '#/components/schemas/TrainingSession' }
+                  streak: { $ref: '#/components/schemas/Streak' }
+                  daily_goal: { $ref: '#/components/schemas/DailyGoal' }
+                  newly_awarded:
+                    type: array
+                    items: { $ref: '#/components/schemas/Achievement' }
+
+  /user-stats:
+    get:
+      tags: [Gamification]
+      summary: Gamification-scope stats (snake_case)
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_cards: { type: integer }
+                  total_sessions: { type: integer }
+                  current_streak: { type: integer }
+                  longest_streak: { type: integer }
+
+  /achievements:
+    get:
+      tags: [Gamification]
+      summary: List achievements with per-caller unlock state
+      responses:
+        '200':
+          description: Achievements
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Achievement' } }
+
+  /ai/quota:
+    get:
+      tags: [AI]
+      summary: Current AI quota + access
+      description: Auth-only (no email-verified gate). Shows today's used/limit for each feature.
+      responses:
+        '200':
+          description: Quota snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuotaSnapshot' }
+
+  /ai/flashcards/prompt:
+    post:
+      tags: [AI]
+      summary: Generate flashcards from a prompt (SSE)
+      description: |
+        Returns Server-Sent Events. Frames:
+          - `event: job\ndata: {"jobId": 1}`
+          - `event: card\ndata: {"title":...,"question":...,"answer":...}` (repeated)
+          - `event: done\ndata: {"ok":true}` OR `event: error\ndata: {"code":...,"message":...}`
+
+        Swagger UI cannot render SSE well — use `curl -N` for the best experience.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromptGenInput' }
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream: { schema: { type: string } }
+        '402':
+          description: No AI access (comp/subscription required)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: Concurrent generation already running
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Daily quota exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /ai/flashcards/pdf:
+    post:
+      tags: [AI]
+      summary: Generate flashcards from PDF (multipart, SSE)
+      description: |
+        multipart/form-data. Same SSE event shape as `/ai/flashcards/prompt`.
+
+        Limits: 20 MB body, 30 pages, 30 s per-page render timeout.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [subject_id, file]
+              properties:
+                subject_id: { type: integer, format: int64 }
+                chapter_id: { type: integer, format: int64, description: "Optional. When set, suppresses auto-chapters." }
+                coverage: { type: string, enum: [essentials, balanced, comprehensive], default: balanced }
+                style: { type: string, enum: [short, standard, detailed], default: standard }
+                focus: { type: string }
+                auto_chapters: { type: string, enum: ["true", "false"] }
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream: { schema: { type: string } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402':
+          description: No AI access
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Quota exceeded or PDF too large
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /ai/check:
+    post:
+      tags: [AI]
+      summary: AI review of a single flashcard (JSON)
+      description: Non-streaming. Returns verdict + optional findings + suggested rewrite.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CheckInput' }
+      responses:
+        '200':
+          description: Check output
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CheckOutput' }
+        '402':
+          description: No AI access
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: Provider content-policy refusal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Quota exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /ai/commit-generation:
+    post:
+      tags: [AI]
+      summary: Persist an edited AI draft (chapters + cards) in one tx
+      description: Cards are inserted with `source='ai'`. Unknown chapterClientId values abort the transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommitInput' }
+      responses:
+        '200':
+          description: Inserted ids
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommitOutput' }
+
+  /admin/grant-ai-access:
+    post:
+      tags: [Admin]
+      summary: Grant or revoke comp AI access for a user
+      description: Admin-only. Writes a `user_subscriptions` row with `plan='comp'`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, active]
+              properties:
+                user_id: { type: integer, format: int64 }
+                active: { type: boolean }
+      responses:
+        '200':
+          description: Echo + post-mutation state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId: { type: integer, format: int64 }
+                  aiAccess: { type: boolean }
+        '403':
+          description: Not admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthorized:
+      description: Missing/invalid token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            field: { type: string }
+
+    TokenResponse:
+      type: object
+      properties:
+        token: { type: string }
+
+    RegisterInput:
+      type: object
+      required: [username, email, password]
+      properties:
+        username: { type: string }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+
+    LoginInput:
+      type: object
+      required: [identifier, password]
+      properties:
+        identifier: { type: string, description: username or email }
+        password: { type: string }
+
+    Subject:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        owner_id: { type: integer, format: int64 }
+        name: { type: string }
+        color: { type: string }
+        icon: { type: string }
+        tags: { type: string }
+        visibility: { type: string, enum: [private, friends, public] }
+        archived: { type: boolean }
+        description: { type: string }
+        last_used: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SubjectCreateInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        color: { type: string }
+        icon: { type: string }
+        tags: { type: string }
+        visibility: { type: string, enum: [private, friends, public] }
+        description: { type: string }
+
+    SubjectUpdateInput:
+      type: object
+      properties:
+        name: { type: string, nullable: true }
+        color: { type: string, nullable: true }
+        icon: { type: string, nullable: true }
+        tags: { type: string, nullable: true }
+        visibility: { type: string, enum: [private, friends, public], nullable: true }
+        archived: { type: boolean, nullable: true }
+        description: { type: string, nullable: true }
+
+    Chapter:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        subject_id: { type: integer, format: int64 }
+        title: { type: string }
+        position: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Flashcard:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        subject_id: { type: integer, format: int64 }
+        chapter_id: { type: integer, format: int64, nullable: true }
+        title: { type: string }
+        question: { type: string }
+        answer: { type: string }
+        image_id: { type: string, nullable: true }
+        source: { type: string, enum: [manual, ai] }
+        due_at: { type: string, format: date-time, nullable: true }
+        last_result: { type: integer, enum: [-1, 0, 1, 2] }
+        last_used: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    FlashcardCreateInput:
+      type: object
+      required: [subject_id, question, answer]
+      properties:
+        subject_id: { type: integer, format: int64 }
+        chapter_id: { type: integer, format: int64, nullable: true }
+        title: { type: string }
+        question: { type: string }
+        answer: { type: string }
+        image_id: { type: string, nullable: true }
+        source: { type: string, enum: [manual, ai] }
+
+    FlashcardUpdateInput:
+      type: object
+      properties:
+        chapter_id: { type: integer, format: int64, nullable: true }
+        title: { type: string, nullable: true }
+        question: { type: string, nullable: true }
+        answer: { type: string, nullable: true }
+        image_id: { type: string, nullable: true }
+
+    Friendship:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        sender_id: { type: integer, format: int64 }
+        receiver_id: { type: integer, format: int64 }
+        status: { type: string, enum: [pending, accepted, declined] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Collaborator:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        subject_id: { type: integer, format: int64 }
+        user_id: { type: integer, format: int64 }
+        role: { type: string, enum: [viewer, editor] }
+        created_at: { type: string, format: date-time }
+
+    InviteLink:
+      type: object
+      properties:
+        token: { type: string }
+        subject_id: { type: integer, format: int64 }
+        role: { type: string, enum: [viewer, editor] }
+        expires_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Prefs:
+      type: object
+      properties:
+        user_id: { type: integer, format: int64 }
+        ai_planning_enabled: { type: boolean }
+        daily_goal_target: { type: integer }
+
+    Streak:
+      type: object
+      properties:
+        user_id: { type: integer, format: int64 }
+        current_streak: { type: integer }
+        longest_streak: { type: integer }
+        last_day: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time }
+
+    DailyGoal:
+      type: object
+      properties:
+        user_id: { type: integer, format: int64 }
+        day: { type: string, format: date-time }
+        done_today: { type: integer }
+        target: { type: integer }
+
+    TrainingSession:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        user_id: { type: integer, format: int64 }
+        subject_id: { type: integer, format: int64 }
+        card_count: { type: integer }
+        duration_ms: { type: integer }
+        score: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    Achievement:
+      type: object
+      properties:
+        code: { type: string }
+        title: { type: string }
+        description: { type: string }
+        unlocked_at: { type: string, format: date-time, nullable: true }
+
+    Image:
+      type: object
+      properties:
+        id: { type: string }
+        url: { type: string }
+
+    AggregateStats:
+      type: object
+      description: camelCase stats from GET /get-user-stats
+      properties:
+        masteryPercent: { type: number, format: float }
+        cardsStudied: { type: integer }
+        totalCards: { type: integer }
+        goodCount: { type: integer }
+        okCount: { type: integer }
+        badCount: { type: integer }
+        newCount: { type: integer }
+        badgesUnlocked: { type: integer }
+        badgesTotal: { type: integer }
+
+    QuotaBucket:
+      type: object
+      properties:
+        used: { type: integer }
+        limit: { type: integer }
+        resetAt: { type: string, format: date-time }
+
+    PDFBucket:
+      type: object
+      properties:
+        used: { type: integer }
+        limit: { type: integer }
+        pagesUsed: { type: integer }
+        pagesLimit: { type: integer }
+        resetAt: { type: string, format: date-time }
+
+    QuotaSnapshot:
+      type: object
+      properties:
+        aiAccess: { type: boolean }
+        prompt: { $ref: '#/components/schemas/QuotaBucket' }
+        pdf: { $ref: '#/components/schemas/PDFBucket' }
+        check: { $ref: '#/components/schemas/QuotaBucket' }
+
+    PromptGenInput:
+      type: object
+      required: [subject_id, prompt]
+      properties:
+        subject_id: { type: integer, format: int64 }
+        chapter_id: { type: integer, format: int64, description: "Optional. When set, auto-chapters is suppressed." }
+        prompt: { type: string, maxLength: 8000 }
+        target_count: { type: integer, minimum: 0, maximum: 50, description: "0 = auto" }
+        style: { type: string, enum: [short, standard, detailed], default: standard }
+        focus: { type: string }
+
+    CheckInput:
+      type: object
+      required: [flashcard_id]
+      properties:
+        flashcard_id: { type: integer, format: int64 }
+        draft_question: { type: string, description: "If non-empty, overrides stored question." }
+        draft_answer: { type: string, description: "If non-empty, overrides stored answer." }
+
+    CheckFinding:
+      type: object
+      properties:
+        kind: { type: string, enum: [factual, style, typo] }
+        text: { type: string }
+
+    CheckSuggestion:
+      type: object
+      properties:
+        title: { type: string }
+        question: { type: string }
+        answer: { type: string }
+
+    CheckOutput:
+      type: object
+      properties:
+        jobId: { type: integer, format: int64 }
+        verdict: { type: string, enum: [ok, minor_issues, major_issues] }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/CheckFinding' }
+        suggestion: { $ref: '#/components/schemas/CheckSuggestion' }
+
+    CommitChapterIn:
+      type: object
+      required: [clientId, title]
+      properties:
+        clientId: { type: string, description: Frontend-generated join key }
+        title: { type: string }
+
+    CommitCardIn:
+      type: object
+      required: [question, answer]
+      properties:
+        chapterClientId: { type: string, description: "Empty string = loose card" }
+        title: { type: string }
+        question: { type: string }
+        answer: { type: string }
+
+    CommitInput:
+      type: object
+      required: [subject_id, cards]
+      properties:
+        job_id: { type: integer, format: int64 }
+        subject_id: { type: integer, format: int64 }
+        chapters:
+          type: array
+          items: { $ref: '#/components/schemas/CommitChapterIn' }
+        cards:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/CommitCardIn' }
+
+    CommitOutput:
+      type: object
+      properties:
+        subjectId: { type: integer, format: int64 }
+        chapterIds:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+          description: Map of clientId → new chapter id
+        cardIds:
+          type: array
+          items: { type: integer, format: int64 }
