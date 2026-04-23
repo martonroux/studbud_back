@@ -3,8 +3,10 @@ package handler_test
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,5 +66,42 @@ func newAIGenServer(t *testing.T, pool *pgxpool.Pool, cli aiProvider.Client) htt
 	mux := http.NewServeMux()
 	stack := middleware.Chain(middleware.Auth(signer), middleware.RequireVerified())
 	mux.Handle("POST /ai/flashcards/prompt", stack(http.HandlerFunc(h.GenerateFromPrompt)))
+	return mux
+}
+
+func TestGenerateFromPDF_RejectsWithoutFile(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	srv := newAIPDFServer(t, pool, &testutil.FakeAIClient{})
+	tok := mintToken(t, u.ID, true, false)
+
+	form := new(bytes.Buffer)
+	writer := multipart.NewWriter(form)
+	_ = writer.WriteField("subject_id", strconv.FormatInt(subj.ID, 10))
+	_ = writer.Close()
+	req := httptest.NewRequest("POST", "/ai/flashcards/pdf", form)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+}
+
+func newAIPDFServer(t *testing.T, pool *pgxpool.Pool, cli aiProvider.Client) http.Handler {
+	t.Helper()
+	signer := jwtsigner.NewSigner("a-minimum-32-byte-secret-xxxxxxxxxx", "studbud-test", time.Hour)
+	acc := access.NewService(pool)
+	ai := aipipeline.NewService(pool, cli, acc, aipipeline.DefaultQuotaLimits(), "test-model")
+	h := handler.NewAIHandler(ai)
+	mux := http.NewServeMux()
+	stack := middleware.Chain(middleware.Auth(signer), middleware.RequireVerified())
+	mux.Handle("POST /ai/flashcards/pdf", stack(http.HandlerFunc(h.GenerateFromPDF)))
 	return mux
 }

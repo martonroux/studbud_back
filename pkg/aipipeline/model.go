@@ -3,6 +3,8 @@ package aipipeline
 import (
 	"encoding/json"
 	"time"
+
+	"studbud/backend/internal/aiProvider"
 )
 
 // FeatureKey identifies the feature that an AI call belongs to.
@@ -55,6 +57,7 @@ type AIRequest struct {
 	Prompt      string          // Prompt is the assembled user-facing prompt body
 	PDFBytes    []byte          // PDFBytes is populated only for FeatureGenerateFromPDF
 	PDFPages    int             // PDFPages is the declared page count (pre-counted by handler)
+	Images      []aiProvider.ImagePart // Images is populated only for FeatureGenerateFromPDF (pre-rasterized)
 	Schema      json.RawMessage // Schema is the tool-use JSON schema for the expected output
 	Metadata    map[string]any  // Metadata is persisted into ai_jobs.metadata (style, focus, coverage...)
 }
