@@ -138,30 +138,41 @@ func (s *Service) streamOnce(ctx context.Context, req AIRequest, jobID int64, ou
 func (s *Service) consumeStream(ctx context.Context, chunks <-chan aiProvider.Chunk, out chan<- AIChunk) streamResult {
 	r := streamResult{}
 	p := newArrayParser("items")
-	p.onElement = func(b []byte) {
-		if isWellFormedObject(b) {
-			cp := append([]byte(nil), b...)
-			select {
-			case out <- AIChunk{Kind: ChunkItem, Item: cp}:
-				r.emitted++
-			case <-ctx.Done():
-			}
-		} else {
+	p.onElement = elementEmitter(ctx, out, &r)
+	feedChunks(ctx, p, chunks, &r)
+	return r
+}
+
+// elementEmitter returns the onElement callback that forwards valid items to out.
+func elementEmitter(ctx context.Context, out chan<- AIChunk, r *streamResult) func([]byte) {
+	return func(b []byte) {
+		if !isWellFormedObject(b) {
 			r.dropped++
+			return
+		}
+		cp := append([]byte(nil), b...)
+		select {
+		case out <- AIChunk{Kind: ChunkItem, Item: cp}:
+			r.emitted++
+		case <-ctx.Done():
 		}
 	}
+}
+
+// feedChunks drains the provider channel into the parser until ctx cancels or the channel closes.
+func feedChunks(ctx context.Context, p *arrayParser, chunks <-chan aiProvider.Chunk, r *streamResult) {
 	for {
 		select {
 		case <-ctx.Done():
 			r.err = ctx.Err()
-			return r
+			return
 		case c, ok := <-chunks:
 			if !ok {
-				return r
+				return
 			}
 			p.feed([]byte(c.Text))
 			if c.Done {
-				return r
+				return
 			}
 		}
 	}
