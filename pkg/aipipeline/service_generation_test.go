@@ -124,3 +124,82 @@ func indexByte(s string, b byte) int {
 	}
 	return -1
 }
+
+func TestRun_HappyPath_EmitsItemsThenDone(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	cli := &testutil.FakeAIClient{
+		Chunks: []aiProvider.Chunk{
+			{Text: `{"items":[{"title":"t1","question":"q1","answer":"a1"},`},
+			{Text: `{"title":"t2","question":"q2","answer":"a2"}]}`, Done: true},
+		},
+	}
+	svc := newPipelineSvc(pool, cli)
+	ch, jobID, err := svc.RunStructuredGeneration(context.Background(), newPromptReq(u.ID, subj.ID))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var items []json.RawMessage
+	var sawDone bool
+	for c := range ch {
+		switch c.Kind {
+		case aipipeline.ChunkItem:
+			items = append(items, c.Item)
+		case aipipeline.ChunkDone:
+			sawDone = true
+		case aipipeline.ChunkError:
+			t.Fatalf("unexpected error chunk: %v", c.Err)
+		}
+	}
+	if !sawDone {
+		t.Error("missing ChunkDone")
+	}
+	if len(items) != 2 {
+		t.Errorf("items count = %d, want 2", len(items))
+	}
+
+	var status string
+	var emitted int
+	_ = pool.QueryRow(context.Background(), `SELECT status, items_emitted FROM ai_jobs WHERE id=$1`, jobID).Scan(&status, &emitted)
+	if status != "complete" || emitted != 2 {
+		t.Errorf("row (%q, emitted=%d), want (complete, 2)", status, emitted)
+	}
+
+	var prompt int
+	_ = pool.QueryRow(context.Background(), `SELECT prompt_calls FROM ai_quota_daily WHERE user_id=$1 AND day=current_date`, u.ID).Scan(&prompt)
+	if prompt != 1 {
+		t.Errorf("prompt_calls = %d, want 1 (one successful job)", prompt)
+	}
+}
+
+func TestRun_DropsSchemaInvalidItems(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	cli := &testutil.FakeAIClient{
+		Chunks: []aiProvider.Chunk{
+			{Text: `{"items":[{"title":"ok"},not-json,{"title":"ok2"}]}`, Done: true},
+		},
+	}
+	svc := newPipelineSvc(pool, cli)
+	ch, jobID, err := svc.RunStructuredGeneration(context.Background(), newPromptReq(u.ID, subj.ID))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for range ch {
+	}
+	var emitted, dropped int
+	_ = pool.QueryRow(context.Background(), `SELECT items_emitted, items_dropped FROM ai_jobs WHERE id=$1`, jobID).Scan(&emitted, &dropped)
+	if emitted != 2 {
+		t.Errorf("emitted = %d, want 2", emitted)
+	}
+	_ = dropped
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"studbud/backend/internal/aiProvider"
 	"studbud/backend/internal/myErrors"
 )
 
@@ -96,13 +97,91 @@ func (s *Service) insertJob(ctx context.Context, req AIRequest) (int64, error) {
 	return jobID, nil
 }
 
-// drive is the placeholder stream driver filled in by Task 9.
-// Task 8 ships a minimal version that closes immediately so tests that drain
-// the channel don't deadlock.
+// drive runs the provider stream, parses incoming JSON into array elements,
+// emits ChunkItem / ChunkDone / ChunkError, and finalizes the ai_jobs row.
 func (s *Service) drive(ctx context.Context, req AIRequest, jobID int64, out chan<- AIChunk) {
 	defer close(out)
-	_ = s.finalizeSuccess(context.Background(), jobID, 0, 0, 0, 0, 0)
+	result := s.streamOnce(ctx, req, jobID, out)
+	s.finalize(ctx, jobID, req, result, out)
+}
+
+// streamResult aggregates what happened during one provider stream.
+type streamResult struct {
+	inputTokens  int   // inputTokens is the provider's prompt-token count
+	outputTokens int   // outputTokens is the provider's completion-token count
+	centsSpent   int   // centsSpent is the rounded cost estimate
+	emitted      int   // emitted counts items that passed validation
+	dropped      int   // dropped counts items that failed validation
+	err          error // err is nil on success
+}
+
+// streamOnce calls the provider once and drives the parser. Caller handles retry.
+func (s *Service) streamOnce(ctx context.Context, req AIRequest, jobID int64, out chan<- AIChunk) streamResult {
+	chunks, err := s.provider.Stream(ctx, aiProvider.Request{
+		FeatureKey: string(req.Feature),
+		Model:      s.model,
+		Prompt:     req.Prompt,
+		PDFBytes:   req.PDFBytes,
+	})
+	if err != nil {
+		return streamResult{err: classifyProviderStartErr(err)}
+	}
+	return s.consumeStream(ctx, chunks, out)
+}
+
+// consumeStream reads chunks, forwards items, counts accepted/dropped.
+func (s *Service) consumeStream(ctx context.Context, chunks <-chan aiProvider.Chunk, out chan<- AIChunk) streamResult {
+	r := streamResult{}
+	p := newArrayParser("items")
+	p.onElement = func(b []byte) {
+		if isWellFormedObject(b) {
+			cp := append([]byte(nil), b...)
+			select {
+			case out <- AIChunk{Kind: ChunkItem, Item: cp}:
+				r.emitted++
+			case <-ctx.Done():
+			}
+		} else {
+			r.dropped++
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			r.err = ctx.Err()
+			return r
+		case c, ok := <-chunks:
+			if !ok {
+				return r
+			}
+			p.feed([]byte(c.Text))
+			if c.Done {
+				return r
+			}
+		}
+	}
+}
+
+// finalize writes the terminal state to ai_jobs and emits the last chunk.
+func (s *Service) finalize(ctx context.Context, jobID int64, req AIRequest, r streamResult, out chan<- AIChunk) {
+	bg := context.Background() // decouple finalize from request cancellation
+	if r.err != nil {
+		s.finalizeError(bg, jobID, r, out)
+		return
+	}
+	_ = s.finalizeSuccess(bg, jobID, r.inputTokens, r.outputTokens, r.centsSpent, r.emitted, r.dropped)
+	if r.emitted > 0 {
+		_ = s.DebitQuota(bg, req.UserID, req.Feature, 1, 0)
+	}
 	out <- AIChunk{Kind: ChunkDone}
+}
+
+// finalizeError marks the job failed and surfaces the error to the client.
+func (s *Service) finalizeError(ctx context.Context, jobID int64, r streamResult, out chan<- AIChunk) {
+	kind, msg := classifyErrForPersistence(r.err)
+	_, _ = s.db.Exec(ctx, sqlFinalizeAIJobFailure, jobID, statusFor(r.err),
+		r.inputTokens, r.outputTokens, r.centsSpent, r.emitted, r.dropped, kind, msg)
+	out <- AIChunk{Kind: ChunkError, Err: r.err}
 }
 
 // finalizeSuccess marks a job complete with the provided telemetry.
