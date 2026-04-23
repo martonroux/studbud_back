@@ -168,9 +168,36 @@ func errorPayload(err error) map[string]any {
 	return map[string]any{"code": "internal", "message": err.Error()}
 }
 
-// Check stubs POST /ai/check until Task 18.
+// checkInput is the POST /ai/check body.
+type checkInput struct {
+	FlashcardID   int64  `json:"flashcard_id"`   // FlashcardID is the flashcard to check
+	DraftQuestion string `json:"draft_question"` // DraftQuestion overrides the stored question when non-empty
+	DraftAnswer   string `json:"draft_answer"`   // DraftAnswer overrides the stored answer when non-empty
+}
+
+// Check runs a non-streaming AI check over a flashcard.
 func (h *AIHandler) Check(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteError(w, myErrors.ErrNotImplemented)
+	uid := authctx.UID(r.Context())
+	var in checkInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.WriteError(w, &myErrors.AppError{Code: "invalid_input", Message: "malformed JSON", Wrapped: myErrors.ErrInvalidInput})
+		return
+	}
+	if in.FlashcardID <= 0 {
+		httpx.WriteError(w, &myErrors.AppError{Code: "validation", Message: "flashcard_id required", Wrapped: myErrors.ErrValidation, Field: "flashcard_id"})
+		return
+	}
+	out, err := h.svc.CheckFlashcard(r.Context(), aipipeline.CheckInput{
+		UserID:        uid,
+		FlashcardID:   in.FlashcardID,
+		DraftQuestion: in.DraftQuestion,
+		DraftAnswer:   in.DraftAnswer,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // Quota returns the authenticated user's current AI quota snapshot.
