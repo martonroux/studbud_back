@@ -13,6 +13,7 @@ import (
 
 	"studbud/backend/db_sql"
 	"studbud/backend/internal/config"
+	"studbud/backend/internal/cron"
 )
 
 // main is the binary entrypoint.
@@ -40,6 +41,14 @@ func run() error {
 	if err := db_sql.SetupAll(ctx, d.db); err != nil {
 		return fmt.Errorf("setup schema:\n%w", err)
 	}
+	d.scheduler.Register(cron.Job{
+		Name:     "aiJobsOrphanReaper",
+		Interval: 10 * time.Minute,
+		Run: func(ctx context.Context) error {
+			_, err := d.ai.ReapOrphanedJobs(ctx)
+			return err
+		},
+	})
 	d.scheduler.Start(ctx)
 
 	srv := newServer(cfg, d)
