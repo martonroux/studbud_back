@@ -62,6 +62,7 @@ func registerAuthReadRoutes(mux *http.ServeMux, d *deps, auth func(http.HandlerF
 	chapH := handler.NewChapterHandler(d.chapter)
 	fcH := handler.NewFlashcardHandler(d.flashcard)
 	searchH := handler.NewSearchHandler(d.search)
+	aiH := handler.NewAIHandler(d.ai)
 
 	mux.Handle("POST /user-test-jwt", auth(userH.TestJWT))
 	mux.Handle("POST /resend-verification", auth(emailVerH.Resend))
@@ -73,6 +74,7 @@ func registerAuthReadRoutes(mux *http.ServeMux, d *deps, auth func(http.HandlerF
 	mux.Handle("POST /flashcard-review", auth(fcH.Review))
 	mux.Handle("GET /search/subjects", auth(searchH.Subjects))
 	mux.Handle("GET /search/users", auth(searchH.Users))
+	mux.Handle("GET /ai/quota", auth(aiH.Quota))
 }
 
 // registerAuthSocialRoutes attaches authenticated social, settings, and billing routes.

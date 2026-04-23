@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"studbud/backend/internal/authctx"
 	"studbud/backend/internal/httpx"
 	"studbud/backend/internal/myErrors"
 	"studbud/backend/pkg/aipipeline"
@@ -31,4 +32,15 @@ func (h *AIHandler) GenerateFromPDF(w http.ResponseWriter, r *http.Request) {
 // Check stubs POST /ai/check until Task 18.
 func (h *AIHandler) Check(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, myErrors.ErrNotImplemented)
+}
+
+// Quota returns the authenticated user's current AI quota snapshot.
+func (h *AIHandler) Quota(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	snap, err := h.svc.QuotaSnapshot(r.Context(), uid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, snap)
 }
