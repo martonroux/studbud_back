@@ -25,12 +25,12 @@ func NewAIHandler(svc *aipipeline.Service) *AIHandler {
 
 // promptGenInput is the POST /ai/flashcards/prompt body.
 type promptGenInput struct {
-	SubjectID   int64  `json:"subject_id"`
-	ChapterID   int64  `json:"chapter_id"`
-	Prompt      string `json:"prompt"`
-	TargetCount int    `json:"target_count"`
-	Style       string `json:"style"`
-	Focus       string `json:"focus"`
+	SubjectID   int64  `json:"subject_id"`   // SubjectID is the target subject
+	ChapterID   int64  `json:"chapter_id"`   // ChapterID is optional; when set, auto-chapters is suppressed
+	Prompt      string `json:"prompt"`       // Prompt is the user's topic description
+	TargetCount int    `json:"target_count"` // TargetCount is 0 (auto) or 1..50
+	Style       string `json:"style"`        // Style is "short" | "standard" | "detailed"
+	Focus       string `json:"focus"`        // Focus is an optional narrowing phrase
 }
 
 // GenerateFromPrompt is the SSE endpoint for prompt-based flashcard generation.
