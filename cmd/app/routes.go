@@ -15,12 +15,15 @@ func buildRouter(d *deps) http.Handler {
 	verifiedMW := middleware.RequireVerified()
 	auth := wrap(authMW)
 	av := wrap(authMW, verifiedMW)
+	admMW := middleware.RequireAdmin()
+	adm := wrap(authMW, verifiedMW, admMW)
 
 	registerPublicRoutes(mux, d)
 	registerAuthReadRoutes(mux, d, auth)
 	registerAuthSocialRoutes(mux, d, auth)
 	registerVerifiedRoutes(mux, d, av)
 	registerStubRoutes(mux, d, av)
+	registerAdminRoutes(mux, d, adm)
 
 	stack := middleware.Chain(
 		middleware.Recoverer(),
@@ -148,4 +151,10 @@ func registerStubRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFunc) h
 	mux.Handle("POST /duel/invite", av(duelH.Invite))
 	mux.Handle("POST /duel/accept", av(duelH.Accept))
 	mux.Handle("GET /duel/connect", av(duelH.Connect))
+}
+
+// registerAdminRoutes attaches admin-only routes (auth + verified + admin).
+func registerAdminRoutes(mux *http.ServeMux, d *deps, adm func(http.HandlerFunc) http.Handler) {
+	adminAIH := handler.NewAdminAIHandler(d.billing, d.access)
+	mux.Handle("POST /admin/grant-ai-access", adm(adminAIH.GrantAIAccess))
 }

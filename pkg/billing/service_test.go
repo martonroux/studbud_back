@@ -1,0 +1,67 @@
+package billing_test
+
+import (
+	"context"
+	"testing"
+
+	"studbud/backend/internal/billing"
+	pkgbilling "studbud/backend/pkg/billing"
+	"studbud/backend/testutil"
+)
+
+func TestGrantComp_InsertsActiveCompRow(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	svc := pkgbilling.NewService(pool, billing.NoopClient{})
+
+	if err := svc.GrantComp(context.Background(), u.ID, true); err != nil {
+		t.Fatalf("GrantComp(true): %v", err)
+	}
+
+	var ok bool
+	_ = pool.QueryRow(context.Background(), `SELECT user_has_ai_access($1)`, u.ID).Scan(&ok)
+	if !ok {
+		t.Fatal("user_has_ai_access = false after GrantComp(true)")
+	}
+}
+
+func TestGrantComp_RevokesByMarkingCanceled(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	svc := pkgbilling.NewService(pool, billing.NoopClient{})
+
+	if err := svc.GrantComp(context.Background(), u.ID, true); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := svc.GrantComp(context.Background(), u.ID, false); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	var ok bool
+	_ = pool.QueryRow(context.Background(), `SELECT user_has_ai_access($1)`, u.ID).Scan(&ok)
+	if ok {
+		t.Fatal("user_has_ai_access = true after revoke")
+	}
+}
+
+func TestGrantComp_IdempotentOnDoubleGrant(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	svc := pkgbilling.NewService(pool, billing.NoopClient{})
+
+	if err := svc.GrantComp(context.Background(), u.ID, true); err != nil {
+		t.Fatalf("grant1: %v", err)
+	}
+	if err := svc.GrantComp(context.Background(), u.ID, true); err != nil {
+		t.Fatalf("grant2: %v", err)
+	}
+
+	var n int
+	_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM user_subscriptions WHERE user_id = $1 AND plan = 'comp'`, u.ID).Scan(&n)
+	if n != 1 {
+		t.Errorf("comp-row count = %d, want 1", n)
+	}
+}
