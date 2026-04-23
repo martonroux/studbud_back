@@ -200,19 +200,24 @@ func (h *AIHandler) GenerateFromPDF(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	rendered, err := aipipeline.RenderPDFGen(aipipeline.PDFGenValues{
-		SubjectName:  subject.Name,
+	rendered, err := renderPDFPrompt(in, subject.Name)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	h.runPDFGeneration(r.Context(), w, uid, in, rendered, images)
+}
+
+// renderPDFPrompt renders the PDF-mode prompt template from form inputs.
+func renderPDFPrompt(in pdfGenInput, subjectName string) (string, error) {
+	return aipipeline.RenderPDFGen(aipipeline.PDFGenValues{
+		SubjectName:  subjectName,
 		Style:        in.Style,
 		Coverage:     in.Coverage,
 		CoverageHint: coverageHint(in.Coverage),
 		Focus:        in.Focus,
 		AutoChapters: in.AutoChapters && in.ChapterID == 0,
 	})
-	if err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	h.runPDFGeneration(r.Context(), w, uid, in, rendered, images)
 }
 
 // runPDFGeneration pushes the assembled request through the pipeline with images attached.
