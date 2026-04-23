@@ -1,6 +1,9 @@
 package aipipeline
 
 import (
+	"errors"
+
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"studbud/backend/internal/aiProvider"
@@ -19,4 +22,9 @@ type Service struct {
 // NewService constructs a Service. Methods are filled in across later tasks.
 func NewService(db *pgxpool.Pool, provider aiProvider.Client, access *access.Service, limits QuotaLimits, model string) *Service {
 	return &Service{db: db, provider: provider, access: access, limits: limits, model: model}
+}
+
+// isNoRows returns true when err is pgx's "no rows" sentinel.
+func isNoRows(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows)
 }
