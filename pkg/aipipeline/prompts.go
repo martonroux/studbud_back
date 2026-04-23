@@ -85,3 +85,12 @@ type CheckValues struct {
 	Question    string // Question is the flashcard prompt
 	Answer      string // Answer is the flashcard answer
 }
+
+// RenderPromptGen is the exported wrapper for the prompt-mode template.
+func RenderPromptGen(v PromptGenValues) (string, error) { return renderPromptGenPrompt(v) }
+
+// RenderPDFGen is the exported wrapper for the PDF-mode template.
+func RenderPDFGen(v PDFGenValues) (string, error) { return renderPromptGenPDF(v) }
+
+// RenderCheck is the exported wrapper for the check-flashcard template.
+func RenderCheck(v CheckValues) (string, error) { return renderPromptCheck(v) }
