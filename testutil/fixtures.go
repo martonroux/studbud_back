@@ -171,3 +171,67 @@ func isKnownQuotaColumn(col string) bool {
 
 // Now returns a fixed clock value used in time-sensitive fixtures.
 func Now() time.Time { return time.Date(2026, 4, 21, 12, 0, 0, 0, time.UTC) }
+
+// SeedQuotaAt sets the named quota counter for the given user to value for today.
+// Inserts a row if none exists.
+func SeedQuotaAt(t *testing.T, pool *pgxpool.Pool, uid int64, column string, value int) {
+	t.Helper()
+	if !isKnownQuotaColumn(column) {
+		t.Fatalf("unknown quota column %q", column)
+	}
+	sql := fmt.Sprintf(`
+        INSERT INTO ai_quota_daily (user_id, day, %[1]s)
+        VALUES ($1, current_date, $2)
+        ON CONFLICT (user_id, day) DO UPDATE SET %[1]s = EXCLUDED.%[1]s
+    `, column)
+	if _, err := pool.Exec(context.Background(), sql, uid, value); err != nil {
+		t.Fatalf("seed quota: %v", err)
+	}
+}
+
+// SeedRunningJob inserts an ai_jobs row in status=running and returns its id.
+// Use to simulate concurrent-generation scenarios.
+func SeedRunningJob(t *testing.T, pool *pgxpool.Pool, uid int64, feature string) int64 {
+	t.Helper()
+	var id int64
+	err := pool.QueryRow(context.Background(), `
+        INSERT INTO ai_jobs (user_id, feature_key, model, status, metadata)
+        VALUES ($1, $2, 'test-model', 'running', '{}'::jsonb)
+        RETURNING id
+    `, uid, feature).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed running job: %v", err)
+	}
+	return id
+}
+
+// GiveAICompAccess inserts a comp user_subscriptions row (admin-granted).
+func GiveAICompAccess(t *testing.T, pool *pgxpool.Pool, uid int64) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+        INSERT INTO user_subscriptions (user_id, plan, status)
+        VALUES ($1, 'comp', 'comp')
+    `, uid)
+	if err != nil {
+		t.Fatalf("give comp access: %v", err)
+	}
+}
+
+// CountAIJobs returns the number of ai_jobs rows for user uid.
+func CountAIJobs(t *testing.T, pool *pgxpool.Pool, uid int64) int {
+	t.Helper()
+	var n int
+	err := pool.QueryRow(context.Background(), `SELECT count(*) FROM ai_jobs WHERE user_id = $1`, uid).Scan(&n)
+	if err != nil {
+		t.Fatalf("count ai_jobs: %v", err)
+	}
+	return n
+}
+
+// MakeAdmin sets users.is_admin = true for uid.
+func MakeAdmin(t *testing.T, pool *pgxpool.Pool, uid int64) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `UPDATE users SET is_admin = true WHERE id = $1`, uid); err != nil {
+		t.Fatalf("make admin: %v", err)
+	}
+}
