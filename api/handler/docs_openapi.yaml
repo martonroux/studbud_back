@@ -496,7 +496,7 @@ paths:
     get:
       tags: [Search]
       summary: Search flashcards the caller can view
-      description: Full-text match over title/question/answer. Scope is owner + collaborator + public subjects + friend-visible (when caller is friends with the owner).
+      description: Case-insensitive substring match over title/question/answer (pg_trgm). Scope is owner + collaborator + public subjects + friend-visible (when caller is friends with the owner).
       parameters:
         - in: query
           name: q

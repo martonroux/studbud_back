@@ -95,9 +95,9 @@ func (s *Service) Users(ctx context.Context, query string, limit int) ([]UserHit
 	return out, rows.Err()
 }
 
-// Flashcards searches cards the caller can at least view: owned subjects,
-// subjects where the caller is a collaborator, public subjects, and
-// friend-visible subjects where the caller is a friend of the owner.
+// Flashcards searches cards the caller can at least view (owner, collaborator,
+// public, friend-visible) by case-insensitive substring match over title,
+// question, and answer. Backed by pg_trgm GIN indexes.
 func (s *Service) Flashcards(ctx context.Context, uid int64, query string, limit int) ([]FlashcardHit, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
@@ -107,7 +107,9 @@ func (s *Service) Flashcards(ctx context.Context, uid int64, query string, limit
 		FROM flashcards f
 		JOIN subjects s ON s.id = f.subject_id
 		WHERE s.archived = false
-		  AND f.search_vec @@ plainto_tsquery('simple', $2)
+		  AND (f.title ILIKE '%' || $2 || '%'
+		       OR f.question ILIKE '%' || $2 || '%'
+		       OR f.answer ILIKE '%' || $2 || '%')
 		  AND (
 		        s.owner_id = $1
 		     OR s.visibility = 'public'
@@ -119,7 +121,7 @@ func (s *Service) Flashcards(ctx context.Context, uid int64, query string, limit
 		               OR (fr.sender_id = s.owner_id AND fr.receiver_id = $1))
 		        ))
 		  )
-		ORDER BY ts_rank(f.search_vec, plainto_tsquery('simple', $2)) DESC, f.id DESC
+		ORDER BY GREATEST(similarity(f.title, $2), similarity(f.question, $2), similarity(f.answer, $2)) DESC, f.id DESC
 		LIMIT $3
 	`, uid, query, limit)
 	if err != nil {

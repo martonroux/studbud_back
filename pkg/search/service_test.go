@@ -55,6 +55,15 @@ func TestSearchFlashcards_ScopedToViewableSubjects(t *testing.T) {
 	if len(hits) != 2 {
 		t.Fatalf("expected 2 hits, got %d: %+v", len(hits), hits)
 	}
+
+	// Partial substring: "toch" must match "mitochondria"
+	partial, err := svc.Flashcards(ctx, alice.ID, "toch", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(partial) != 2 {
+		t.Fatalf("partial 'toch' expected 2 hits, got %d: %+v", len(partial), partial)
+	}
 }
 
 func TestSearchUsers(t *testing.T) {
