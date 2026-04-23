@@ -118,6 +118,22 @@ CREATE TABLE IF NOT EXISTS flashcards (
 CREATE INDEX IF NOT EXISTS idx_flashcards_subject ON flashcards(subject_id);
 CREATE INDEX IF NOT EXISTS idx_flashcards_chapter ON flashcards(chapter_id);
 
+ALTER TABLE flashcards ADD COLUMN IF NOT EXISTS search_vec tsvector;
+CREATE INDEX IF NOT EXISTS idx_flashcards_search ON flashcards USING GIN (search_vec);
+CREATE OR REPLACE FUNCTION flashcards_search_vec_update() RETURNS trigger AS $$
+BEGIN
+  NEW.search_vec :=
+    setweight(to_tsvector('simple', coalesce(NEW.title, '')),    'A') ||
+    setweight(to_tsvector('simple', coalesce(NEW.question, '')), 'B') ||
+    setweight(to_tsvector('simple', coalesce(NEW.answer, '')),   'C');
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_flashcards_search_vec ON flashcards;
+CREATE TRIGGER trg_flashcards_search_vec
+  BEFORE INSERT OR UPDATE OF title, question, answer ON flashcards
+  FOR EACH ROW EXECUTE FUNCTION flashcards_search_vec_update();
+UPDATE flashcards SET title = title WHERE search_vec IS NULL;
+
 CREATE TABLE IF NOT EXISTS friendships (
     id           BIGSERIAL PRIMARY KEY,
     sender_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

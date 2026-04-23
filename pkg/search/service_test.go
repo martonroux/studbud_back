@@ -31,6 +31,32 @@ func TestSearchSubjects_OwnedAndPublic(t *testing.T) {
 	}
 }
 
+func TestSearchFlashcards_ScopedToViewableSubjects(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	testutil.Reset(t, db)
+	svc := search.NewService(db)
+
+	alice := testutil.NewVerifiedUser(t, db)
+	bob := testutil.NewVerifiedUser(t, db)
+
+	aliceSubj := testutil.NewSubjectNamed(t, db, alice.ID, "A", "private")
+	bobPublic := testutil.NewSubjectNamed(t, db, bob.ID, "BP", "public")
+	bobPrivate := testutil.NewSubjectNamed(t, db, bob.ID, "BS", "private")
+	testutil.NewFlashcard(t, db, aliceSubj.ID, 0, "What is mitochondria?", "powerhouse")
+	testutil.NewFlashcard(t, db, bobPublic.ID, 0, "Define mitochondria", "the organelle")
+	testutil.NewFlashcard(t, db, bobPrivate.ID, 0, "mitochondria secret", "hidden")
+
+	hits, err := svc.Flashcards(ctx, alice.ID, "mitochondria", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// alice sees her own + bob's public; NOT bob's private
+	if len(hits) != 2 {
+		t.Fatalf("expected 2 hits, got %d: %+v", len(hits), hits)
+	}
+}
+
 func TestSearchUsers(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)

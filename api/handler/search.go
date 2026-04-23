@@ -40,3 +40,15 @@ func (h *SearchHandler) Users(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, hits)
 }
+
+// Flashcards handles GET /search/flashcards?q=...
+func (h *SearchHandler) Flashcards(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	q := r.URL.Query().Get("q")
+	hits, err := h.svc.Flashcards(r.Context(), uid, q, 20)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, hits)
+}

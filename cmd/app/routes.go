@@ -78,6 +78,7 @@ func registerAuthReadRoutes(mux *http.ServeMux, d *deps, auth func(http.HandlerF
 	mux.Handle("POST /flashcard-review", auth(fcH.Review))
 	mux.Handle("GET /search/subjects", auth(searchH.Subjects))
 	mux.Handle("GET /search/users", auth(searchH.Users))
+	mux.Handle("GET /search/flashcards", auth(searchH.Flashcards))
 	mux.Handle("GET /ai/quota", auth(aiH.Quota))
 }
 

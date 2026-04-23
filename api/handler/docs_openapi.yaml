@@ -492,6 +492,25 @@ paths:
             application/json:
               schema: { type: array, items: { type: object, additionalProperties: true } }
 
+  /search/flashcards:
+    get:
+      tags: [Search]
+      summary: Search flashcards the caller can view
+      description: Full-text match over title/question/answer. Scope is owner + collaborator + public subjects + friend-visible (when caller is friends with the owner).
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Up to 20 results
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FlashcardHit' }
+
   /friendship-request:
     post:
       tags: [Friendships]
@@ -1127,6 +1146,15 @@ components:
         question: { type: string, nullable: true }
         answer: { type: string, nullable: true }
         image_id: { type: string, nullable: true }
+
+    FlashcardHit:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        subject_id: { type: integer, format: int64 }
+        chapter_id: { type: integer, format: int64, nullable: true }
+        title: { type: string }
+        question: { type: string }
 
     Friendship:
       type: object
