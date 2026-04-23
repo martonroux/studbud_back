@@ -90,7 +90,7 @@ func buildDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	}
 
 	dom := buildDomainServices(cfg, pool, inf)
-	stubs := buildStubServices(pool, inf)
+	stubs := buildStubServices(cfg, pool, inf, dom.access)
 
 	d := assembleDeps(cfg, pool, inf, dom, stubs)
 	return d, cleanup, nil
@@ -178,9 +178,9 @@ type stubSvcs struct {
 }
 
 // buildStubServices constructs stub/AI-backed services.
-func buildStubServices(pool *pgxpool.Pool, inf infra) stubSvcs {
+func buildStubServices(cfg *config.Config, pool *pgxpool.Pool, inf infra, acc *access.Service) stubSvcs {
 	return stubSvcs{
-		ai:      aipipeline.NewService(pool, inf.aiClient),
+		ai:      aipipeline.NewService(pool, inf.aiClient, acc, aipipeline.DefaultQuotaLimits(), cfg.AIModel),
 		quiz:    quiz.NewService(pool),
 		plan:    pkgplan.NewService(pool),
 		duel:    duel.NewService(pool, inf.hub),

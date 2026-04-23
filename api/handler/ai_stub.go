@@ -8,9 +8,9 @@ import (
 	"studbud/backend/pkg/aipipeline"
 )
 
-// AIHandler exposes AI pipeline endpoints as stubs until Spec A ships.
+// AIHandler exposes AI pipeline endpoints.
 type AIHandler struct {
-	svc *aipipeline.Service // svc is the (stub) pipeline service
+	svc *aipipeline.Service // svc is the AI pipeline service
 }
 
 // NewAIHandler constructs an AIHandler.
@@ -18,17 +18,17 @@ func NewAIHandler(svc *aipipeline.Service) *AIHandler {
 	return &AIHandler{svc: svc}
 }
 
-// GenerateFromPrompt is a stub for POST /ai/flashcards/prompt.
+// GenerateFromPrompt stubs POST /ai/flashcards/prompt until Task 16.
 func (h *AIHandler) GenerateFromPrompt(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, myErrors.ErrNotImplemented)
 }
 
-// GenerateFromPDF is a stub for POST /ai/flashcards/pdf.
+// GenerateFromPDF stubs POST /ai/flashcards/pdf until Task 17.
 func (h *AIHandler) GenerateFromPDF(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, myErrors.ErrNotImplemented)
 }
 
-// Check is a stub for POST /ai/check.
+// Check stubs POST /ai/check until Task 18.
 func (h *AIHandler) Check(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, myErrors.ErrNotImplemented)
 }
