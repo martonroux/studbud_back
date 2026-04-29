@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"image/png"
+	"image/jpeg"
 	"runtime"
 	"sync"
 	"time"
 
 	fitz "github.com/gen2brain/go-fitz"
 )
+
+// jpegQuality controls the JPEG encoder used for rasterized PDF pages.
+// 80 is a strong sweet spot for text/diagram pages: small payloads with
+// no perceptible loss for vision-model OCR.
+const jpegQuality = 80
 
 // PDFOptions configures the PDF→image pipeline.
 type PDFOptions struct {
@@ -81,7 +86,7 @@ func renderOne(
 	var part ImagePart
 	var err error
 	go func() {
-		part, err = renderPagePNG(doc, idx, mu)
+		part, err = renderPageJPEG(doc, idx, mu)
 		close(done)
 	}()
 	select {
@@ -93,9 +98,9 @@ func renderOne(
 	}
 }
 
-// renderPagePNG renders one page to PNG. doc access is serialized via mu
+// renderPageJPEG renders one page to JPEG. doc access is serialized via mu
 // because go-fitz documents are not goroutine-safe.
-func renderPagePNG(doc *fitz.Document, idx int, mu *sync.Mutex) (ImagePart, error) {
+func renderPageJPEG(doc *fitz.Document, idx int, mu *sync.Mutex) (ImagePart, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	img, err := doc.Image(idx)
@@ -103,10 +108,10 @@ func renderPagePNG(doc *fitz.Document, idx int, mu *sync.Mutex) (ImagePart, erro
 		return ImagePart{}, fmt.Errorf("render page %d:\n%w", idx, err)
 	}
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
 		return ImagePart{}, fmt.Errorf("encode page %d:\n%w", idx, err)
 	}
-	return ImagePart{MediaType: "image/png", Data: buf.Bytes()}, nil
+	return ImagePart{MediaType: "image/jpeg", Data: buf.Bytes()}, nil
 }
 
 // combineResults returns imgs when all errs are nil; else the first error.

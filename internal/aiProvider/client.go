@@ -14,8 +14,8 @@ type Chunk struct {
 
 // ImagePart is one rasterized PDF page sent as image content.
 type ImagePart struct {
-	MediaType string // MediaType is always "image/png" in v1
-	Data      []byte // Data is the raw PNG bytes (not base64)
+	MediaType string // MediaType is the IANA image type (e.g., "image/jpeg")
+	Data      []byte // Data is the raw image bytes (not base64)
 }
 
 // Request is the structured-generation invocation shape.

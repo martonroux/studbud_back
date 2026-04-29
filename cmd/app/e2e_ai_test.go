@@ -51,7 +51,7 @@ func setupAIE2E(t *testing.T) *aiE2ECtx {
 	subj := testutil.NewSubject(t, pool, user.ID)
 
 	cfg := &config.Config{
-		Env: "test", FrontendURL: "http://fe.test", BackendURL: "http://be.test",
+		Env: "test", FrontendURL: "http://fe.test", CORSOrigins: []string{"http://fe.test"}, BackendURL: "http://be.test",
 		DatabaseURL: "unused", JWTSecret: "a-minimum-32-byte-secret-xxxxxxxxxx",
 		JWTIssuer: "studbud-test", JWTTTL: time.Hour,
 		SMTPHost: "x", SMTPPort: "1", SMTPFrom: "x@x",

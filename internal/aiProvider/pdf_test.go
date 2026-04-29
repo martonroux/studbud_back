@@ -5,7 +5,7 @@ package aiProvider_test
 import (
 	"bytes"
 	"context"
-	"image/png"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +14,7 @@ import (
 	"studbud/backend/internal/aiProvider"
 )
 
-func TestPDFToImages_ReturnsOnePNGPerPage(t *testing.T) {
+func TestPDFToImages_ReturnsOneJPEGPerPage(t *testing.T) {
 	pdf := loadTestPDF(t)
 	imgs, err := aiProvider.PDFToImages(context.Background(), pdf, aiProvider.PDFOptions{
 		MaxConcurrency: 2,
@@ -27,11 +27,11 @@ func TestPDFToImages_ReturnsOnePNGPerPage(t *testing.T) {
 		t.Fatal("no images returned")
 	}
 	for i, img := range imgs {
-		if img.MediaType != "image/png" {
-			t.Errorf("img[%d].MediaType = %q, want image/png", i, img.MediaType)
+		if img.MediaType != "image/jpeg" {
+			t.Errorf("img[%d].MediaType = %q, want image/jpeg", i, img.MediaType)
 		}
-		if _, err := png.Decode(bytes.NewReader(img.Data)); err != nil {
-			t.Errorf("img[%d] not a PNG: %v", i, err)
+		if _, err := jpeg.Decode(bytes.NewReader(img.Data)); err != nil {
+			t.Errorf("img[%d] not a JPEG: %v", i, err)
 		}
 	}
 }

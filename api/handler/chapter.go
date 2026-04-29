@@ -50,6 +50,22 @@ func (h *ChapterHandler) List(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, list)
 }
 
+// Stats handles GET /chapter-stats?id=...
+func (h *ChapterHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	id, err := httpx.QueryInt64(r, "id")
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	out, err := h.svc.Stats(r.Context(), uid, id)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // Update handles POST /chapter-update?id=...
 func (h *ChapterHandler) Update(w http.ResponseWriter, r *http.Request) {
 	uid := authctx.UID(r.Context())

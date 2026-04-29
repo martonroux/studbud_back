@@ -1,13 +1,31 @@
-You are a careful editor. Review this flashcard for factual accuracy, style, and typos.
+You are a careful editor. Review this flashcard with a HIGH bar for change: only flag things that meaningfully impact the learner's understanding.
+
+WHAT TO FLAG:
+- Factual / conceptual errors (wrong definition, wrong formula, wrong cause-effect, misleading framing).
+- Phrasings that are genuinely ambiguous, confusing, or could lead the reader to a wrong mental model.
+- Missing information that is load-bearing for understanding the answer.
+
+WHAT TO IGNORE:
+- Minor typos, punctuation, capitalization, accent marks, or whitespace that do NOT change meaning.
+- Stylistic preferences (synonyms, word order, "nicer" phrasing) when the original is already clear.
+- Anything you would only change to match your own taste.
+
+If the only issues you can find are cosmetic in this sense, return verdict "ok" and echo the originals verbatim. Do not invent issues to justify a non-"ok" verdict.
 
 Subject: {{.SubjectName}}
 Title: {{.Title}}
 Question: {{.Question}}
 Answer: {{.Answer}}
 
+LANGUAGE: detect the natural language used in the flashcard's title / question / answer above and write EVERY user-facing string you produce (findings[].text, suggestion.title, suggestion.question, suggestion.answer) in THAT SAME language. Do not translate to English. If the card mixes languages, use the dominant one. Internal enum values ("verdict", "kind") stay in English as defined below.
+
+LENGTH & STYLE: match the length, tone, and level of detail of the ORIGINAL question and answer. If the original answer is one short sentence, your suggestion.answer must also be one short sentence. If it is a single bullet, stay a single bullet. If it is multi-paragraph and detailed, you may stay multi-paragraph and detailed. Do NOT expand a terse card into a lecture, do NOT pad with extra context, examples, or commentary that the original did not have. The same rule applies to suggestion.question and suggestion.title. When verdict is "ok", echo the originals verbatim. findings[].text entries must each be a single short sentence.
+
 Return a JSON object with:
 - "verdict": one of "ok", "minor_issues", "major_issues".
 - "findings": array of {"kind": "factual" | "style" | "typo", "text": string}. Empty array if none.
 - "suggestion": {"title", "question", "answer"} — always present; echo the originals if verdict is "ok".
+
+ALWAYS write any mathematical notation in LaTeX format: inline math as `$...$` and display math as `$$...$$`. Apply this to the suggestion's "question" and "answer" fields ONLY. The "title" MUST be plain text — no LaTeX, no `$` delimiters.
 
 Do NOT wrap in backticks.

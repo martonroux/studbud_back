@@ -18,6 +18,14 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// Flush forwards to the underlying writer when it supports http.Flusher, so
+// SSE handlers downstream can push chunks without buffering.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // Logger emits one line per request with method, path, status, duration, uid.
 func Logger() Middleware {
 	return func(next http.Handler) http.Handler {

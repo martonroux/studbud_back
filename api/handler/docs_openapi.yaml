@@ -231,6 +231,22 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Subject' }
 
+  /subject-stats:
+    get:
+      tags: [Subjects]
+      summary: Per-subject card-difficulty distribution
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Per-subject stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubjectStats' }
+
   /subject-create:
     post:
       tags: [Subjects]
@@ -295,6 +311,22 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Chapter' } }
+
+  /chapter-stats:
+    get:
+      tags: [Chapters]
+      summary: Per-chapter card-difficulty distribution
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Per-chapter stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChapterStats' }
 
   /chapter-create:
     post:
@@ -460,18 +492,57 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Flashcard' }
 
-  /search/subjects:
+  /search/subjects/owned:
     get:
       tags: [Search]
-      summary: Search subjects visible to the caller
+      summary: Search subjects owned by the caller
+      description: Paginated search over the caller's own subjects (all visibility levels). Use limit/offset to page; when fewer than limit results come back, the list is exhausted. By default archived subjects are excluded; pass include_archived=true to surface them.
       parameters:
         - in: query
           name: q
           required: true
           schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+        - in: query
+          name: offset
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+        - in: query
+          name: include_archived
+          required: false
+          description: When true, archived owned subjects are included in results.
+          schema: { type: boolean, default: false }
       responses:
         '200':
-          description: Up to 20 results
+          description: One page of hits
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+
+  /search/subjects/public:
+    get:
+      tags: [Search]
+      summary: Discover public subjects authored by other users
+      description: Paginated search over subjects with visibility=public owned by someone other than the caller.
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+        - in: query
+          name: offset
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: One page of hits
           content:
             application/json:
               schema: { type: array, items: { type: object, additionalProperties: true } }
@@ -485,9 +556,17 @@ paths:
           name: q
           required: true
           schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+        - in: query
+          name: offset
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
       responses:
         '200':
-          description: Up to 20 results
+          description: One page of hits
           content:
             application/json:
               schema: { type: array, items: { type: object, additionalProperties: true } }
@@ -495,16 +574,29 @@ paths:
   /search/flashcards:
     get:
       tags: [Search]
-      summary: Search flashcards the caller can view
-      description: Case-insensitive substring match over title/question/answer (pg_trgm). Scope is owner + collaborator + public subjects + friend-visible (when caller is friends with the owner).
+      summary: Search flashcards in the caller's library
+      description: "Case-insensitive substring match over title/question/answer (pg_trgm). Scope is library-only: owner + collaborator + subscribed-public + friend-visible (when caller is an accepted friend of the owner). Random public content is intentionally NOT searched; use /search/subjects/public to discover public subjects, then subscribe to bring them into this search scope. By default archived subjects are excluded; pass include_archived=true to also surface cards from the caller's OWN archived subjects (non-owned archived subjects stay hidden regardless)."
       parameters:
         - in: query
           name: q
           required: true
           schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+        - in: query
+          name: offset
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+        - in: query
+          name: include_archived
+          required: false
+          description: When true, cards from the caller's own archived subjects are included; collaborator/subscribed/friend access still excludes archived.
+          schema: { type: boolean, default: false }
       responses:
         '200':
-          description: Up to 20 results
+          description: One page of hits
           content:
             application/json:
               schema:
@@ -846,7 +938,8 @@ paths:
       description: |
         Returns Server-Sent Events. Frames:
           - `event: job\ndata: {"jobId": 1}`
-          - `event: card\ndata: {"title":...,"question":...,"answer":...}` (repeated)
+          - `event: chapter\ndata: {"index":0,"title":"..."}` (repeated, only when auto_chapters=true)
+          - `event: card\ndata: {"chapterIndex": int|null, "title":...,"question":...,"answer":...}` (repeated)
           - `event: done\ndata: {"ok":true}` OR `event: error\ndata: {"code":...,"message":...}`
 
         Swagger UI cannot render SSE well — use `curl -N` for the best experience.
@@ -883,7 +976,8 @@ paths:
       description: |
         multipart/form-data. Same SSE event shape as `/ai/flashcards/prompt`.
 
-        Limits: 20 MB body, 30 pages, 30 s per-page render timeout.
+        Limits: 20 MB body, 30 s per-page render timeout. Page count is
+        bounded implicitly by the upload size cap.
       requestBody:
         required: true
         content:
@@ -894,7 +988,7 @@ paths:
               properties:
                 subject_id: { type: integer, format: int64 }
                 chapter_id: { type: integer, format: int64, description: "Optional. When set, suppresses auto-chapters." }
-                coverage: { type: string, enum: [essentials, balanced, comprehensive], default: balanced }
+                coverage: { type: string, enum: [Core, Balanced, Comprehensive], default: Balanced }
                 style: { type: string, enum: [short, standard, detailed], default: standard }
                 focus: { type: string }
                 auto_chapters: { type: string, enum: ["true", "false"] }
@@ -1247,6 +1341,30 @@ components:
         badgesUnlocked: { type: integer }
         badgesTotal: { type: integer }
 
+    SubjectStats:
+      type: object
+      description: camelCase card-difficulty distribution for a single subject
+      properties:
+        totalCards: { type: integer }
+        goodCount: { type: integer }
+        okCount: { type: integer }
+        badCount: { type: integer }
+        newCount: { type: integer }
+        cardsStudied: { type: integer }
+        masteryPercent: { type: number, format: float }
+
+    ChapterStats:
+      type: object
+      description: camelCase card-difficulty distribution for a single chapter
+      properties:
+        totalCards: { type: integer }
+        goodCount: { type: integer }
+        okCount: { type: integer }
+        badCount: { type: integer }
+        newCount: { type: integer }
+        cardsStudied: { type: integer }
+        masteryPercent: { type: number, format: float }
+
     QuotaBucket:
       type: object
       properties:
@@ -1278,9 +1396,10 @@ components:
         subject_id: { type: integer, format: int64 }
         chapter_id: { type: integer, format: int64, description: "Optional. When set, auto-chapters is suppressed." }
         prompt: { type: string, maxLength: 8000 }
-        target_count: { type: integer, minimum: 0, maximum: 50, description: "0 = auto" }
         style: { type: string, enum: [short, standard, detailed], default: standard }
+        coverage: { type: string, enum: [Core, Balanced, Comprehensive], default: Balanced }
         focus: { type: string }
+        auto_chapters: { type: boolean, default: false, description: "Propose chapters when chapter_id is unset." }
 
     CheckInput:
       type: object

@@ -28,7 +28,7 @@ func buildRouter(d *deps) http.Handler {
 	stack := middleware.Chain(
 		middleware.Recoverer(),
 		middleware.RequestID(),
-		middleware.CORS(d.cfg.FrontendURL),
+		middleware.CORS(d.cfg.CORSOrigins...),
 		middleware.Logger(),
 	)
 	return stack(mux)
@@ -72,11 +72,14 @@ func registerAuthReadRoutes(mux *http.ServeMux, d *deps, auth func(http.HandlerF
 	mux.Handle("POST /resend-verification", auth(emailVerH.Resend))
 	mux.Handle("GET /subject-list", auth(subjH.List))
 	mux.Handle("GET /subject", auth(subjH.Get))
+	mux.Handle("GET /subject-stats", auth(subjH.Stats))
 	mux.Handle("GET /chapter-list", auth(chapH.List))
+	mux.Handle("GET /chapter-stats", auth(chapH.Stats))
 	mux.Handle("GET /flashcard-list", auth(fcH.ListBySubject))
 	mux.Handle("GET /flashcard", auth(fcH.Get))
 	mux.Handle("POST /flashcard-review", auth(fcH.Review))
-	mux.Handle("GET /search/subjects", auth(searchH.Subjects))
+	mux.Handle("GET /search/subjects/owned", auth(searchH.SubjectsOwned))
+	mux.Handle("GET /search/subjects/public", auth(searchH.SubjectsPublic))
 	mux.Handle("GET /search/users", auth(searchH.Users))
 	mux.Handle("GET /search/flashcards", auth(searchH.Flashcards))
 	mux.Handle("GET /ai/quota", auth(aiH.Quota))

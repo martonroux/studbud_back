@@ -126,7 +126,7 @@ func (s *Service) streamOnce(ctx context.Context, req AIRequest, jobID int64, ou
 		Prompt:     req.Prompt,
 		Images:     req.Images,
 		Schema:     req.Schema,
-		MaxTokens:  4096,
+		MaxTokens:  16384,
 	})
 	if err != nil {
 		return streamResult{err: classifyProviderStartErr(err)}
@@ -134,12 +134,16 @@ func (s *Service) streamOnce(ctx context.Context, req AIRequest, jobID int64, ou
 	return s.consumeStream(ctx, chunks, out)
 }
 
-// consumeStream reads chunks, forwards items, counts accepted/dropped.
+// consumeStream reads chunks, forwards items + chapters, counts accepted/dropped items.
+// Two parsers run in lockstep over the same byte stream: one for the "items"
+// array, one for "chapters". They are independent and order-agnostic.
 func (s *Service) consumeStream(ctx context.Context, chunks <-chan aiProvider.Chunk, out chan<- AIChunk) streamResult {
 	r := streamResult{}
-	p := newArrayParser("items")
-	p.onElement = elementEmitter(ctx, out, &r)
-	feedChunks(ctx, p, chunks, &r)
+	items := newArrayParser("items")
+	items.onElement = elementEmitter(ctx, out, &r)
+	chapters := newArrayParser("chapters")
+	chapters.onElement = chapterEmitter(ctx, out)
+	feedChunks(ctx, []*arrayParser{items, chapters}, chunks, &r)
 	return r
 }
 
@@ -159,8 +163,23 @@ func elementEmitter(ctx context.Context, out chan<- AIChunk, r *streamResult) fu
 	}
 }
 
-// feedChunks drains the provider channel into the parser until ctx cancels or the channel closes.
-func feedChunks(ctx context.Context, p *arrayParser, chunks <-chan aiProvider.Chunk, r *streamResult) {
+// chapterEmitter returns the onElement callback that forwards chapter objects.
+// Chapter telemetry is metadata, so it does not affect the items emitted/dropped counters.
+func chapterEmitter(ctx context.Context, out chan<- AIChunk) func([]byte) {
+	return func(b []byte) {
+		if !isWellFormedObject(b) {
+			return
+		}
+		cp := append([]byte(nil), b...)
+		select {
+		case out <- AIChunk{Kind: ChunkChapter, Item: cp}:
+		case <-ctx.Done():
+		}
+	}
+}
+
+// feedChunks drains the provider channel into every parser until ctx cancels or the channel closes.
+func feedChunks(ctx context.Context, parsers []*arrayParser, chunks <-chan aiProvider.Chunk, r *streamResult) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -170,7 +189,10 @@ func feedChunks(ctx context.Context, p *arrayParser, chunks <-chan aiProvider.Ch
 			if !ok {
 				return
 			}
-			p.feed([]byte(c.Text))
+			b := []byte(c.Text)
+			for _, p := range parsers {
+				p.feed(b)
+			}
 			if c.Done {
 				return
 			}

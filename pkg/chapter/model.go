@@ -12,6 +12,17 @@ type Chapter struct {
 	UpdatedAt time.Time `json:"updated_at"` // UpdatedAt is the last update timestamp
 }
 
+// StatsResponse is returned from GET /chapter-stats.
+type StatsResponse struct {
+	TotalCards     int     `json:"totalCards"`     // TotalCards is the total number of cards in the chapter
+	GoodCount      int     `json:"goodCount"`      // GoodCount is cards whose last review was good (2)
+	OkCount        int     `json:"okCount"`        // OkCount is cards whose last review was ok (1)
+	BadCount       int     `json:"badCount"`       // BadCount is cards whose last review was bad (0)
+	NewCount       int     `json:"newCount"`       // NewCount is cards not yet reviewed (-1)
+	CardsStudied   int     `json:"cardsStudied"`   // CardsStudied is TotalCards - NewCount
+	MasteryPercent float64 `json:"masteryPercent"` // MasteryPercent weights good=1, ok=0.5 against TotalCards
+}
+
 // CreateInput is the payload to create a chapter.
 type CreateInput struct {
 	SubjectID int64  `json:"subject_id"` // SubjectID is the parent subject

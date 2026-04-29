@@ -1,6 +1,9 @@
-You are an expert study-aid author. Generate {{.Target}} flashcards for the subject "{{.SubjectName}}".
+You are an expert study-aid author. Generate flashcards for the subject "{{.SubjectName}}". Choose the appropriate number of cards based on the coverage level and the user's prompt — do not pad with filler, do not truncate substance.
+
+LANGUAGE: detect the natural language used in the user's topic / prompt below and write EVERY user-facing string (chapter titles, flashcard titles, questions, answers) in THAT SAME language. Do not translate to English. If the input mixes languages, use the dominant one.
 
 Audience style: {{.Style}}.
+Coverage: {{.Coverage}} ({{.Hint}}).
 {{if .Focus}}Focus specifically on: {{.Focus}}{{end}}
 
 Topic / user prompt:
@@ -8,6 +11,12 @@ Topic / user prompt:
 {{.Prompt}}
 ---
 
-Output a JSON object with an "items" array. Each item has: title (short heading), question (clear prompt for one concept), answer (concise explanation, markdown OK).
+{{if .AutoChapters}}You MAY propose chapter splits — include a "chapters" array of {index, title} and have each card reference a "chapterIndex". Otherwise, omit the chapters array and set chapterIndex to null.{{end}}
 
-Do NOT wrap the JSON in backticks. Do not add explanatory prose outside the tool call.
+Output a JSON object. Fields:
+- "chapters": optional array of {"index": int, "title": string}. Present only if auto-chapters is enabled.
+- "items": required array. Each item: {"chapterIndex": int|null, "title": string, "question": string, "answer": string}.
+
+ALWAYS write any mathematical notation in LaTeX format: inline math as `$...$` and display math as `$$...$$`. Apply this to "question" and "answer" fields ONLY. Chapter titles and flashcard titles MUST be plain text — no LaTeX, no `$` delimiters.
+
+Output ONLY the JSON object, with no surrounding prose, no markdown code fences, no commentary. Begin your response with `{` and end with `}`.

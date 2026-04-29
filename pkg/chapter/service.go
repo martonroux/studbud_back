@@ -135,6 +135,40 @@ func (s *Service) Delete(ctx context.Context, uid, id int64) error {
 	return nil
 }
 
+// Stats returns the per-difficulty card distribution for a chapter the caller can read.
+func (s *Service) Stats(ctx context.Context, uid, chapterID int64) (*StatsResponse, error) {
+	ch, err := s.load(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	level, err := s.access.SubjectLevel(ctx, uid, ch.SubjectID)
+	if err != nil {
+		return nil, err
+	}
+	if level == access.LevelNone {
+		return nil, myErrors.ErrForbidden
+	}
+	out := &StatsResponse{}
+	err = s.db.QueryRow(ctx, `
+		SELECT
+			COUNT(*)                                   AS total,
+			COUNT(*) FILTER (WHERE last_result = 2)    AS good,
+			COUNT(*) FILTER (WHERE last_result = 1)    AS ok,
+			COUNT(*) FILTER (WHERE last_result = 0)    AS bad,
+			COUNT(*) FILTER (WHERE last_result = -1)   AS new_count
+		FROM flashcards
+		WHERE chapter_id = $1
+	`, chapterID).Scan(&out.TotalCards, &out.GoodCount, &out.OkCount, &out.BadCount, &out.NewCount)
+	if err != nil {
+		return nil, fmt.Errorf("chapter stats:\n%w", err)
+	}
+	out.CardsStudied = out.TotalCards - out.NewCount
+	if out.TotalCards > 0 {
+		out.MasteryPercent = (float64(out.GoodCount) + float64(out.OkCount)*0.5) / float64(out.TotalCards)
+	}
+	return out, nil
+}
+
 // load fetches a chapter row by id, returning ErrNotFound when absent.
 func (s *Service) load(ctx context.Context, id int64) (*Chapter, error) {
 	var ch Chapter

@@ -11,8 +11,9 @@ import (
 type Config struct {
 	Port        string        // Port is the HTTP listen port (e.g. "8080")
 	Env         string        // Env is "dev", "test", or "prod"
-	FrontendURL string        // FrontendURL is the Vue client origin for CORS
-	BackendURL  string        // BackendURL is this server's public URL
+	FrontendURL  string   // FrontendURL is the primary Vue client origin (used for email links)
+	CORSOrigins  []string // CORSOrigins is the full allowlist echoed back for Access-Control-Allow-Origin
+	BackendURL   string   // BackendURL is this server's public URL
 	DatabaseURL string        // DatabaseURL is the full pgx connection string
 	JWTSecret   string        // JWTSecret signs auth tokens (>=32 bytes)
 	JWTIssuer   string        // JWTIssuer is the "iss" claim value
@@ -58,7 +59,8 @@ func loadFromEnv() *Config {
 	return &Config{
 		Port:        getEnvDefault("PORT", "8080"),
 		Env:         getEnvDefault("ENV", "dev"),
-		FrontendURL: os.Getenv("FRONTEND_URL"),
+		FrontendURL: firstCSV(os.Getenv("FRONTEND_URL")),
+		CORSOrigins: splitCSV(os.Getenv("FRONTEND_URL")),
 		BackendURL:  os.Getenv("BACKEND_URL"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		JWTSecret:   os.Getenv("JWT_SECRET"),
@@ -178,4 +180,24 @@ func validateProdRequirements(c *Config) error {
 		return fmt.Errorf("Stripe keys required in prod")
 	}
 	return nil
+}
+
+// splitCSV parses a comma-separated env value into a trimmed, non-empty slice.
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// firstCSV returns the first non-empty entry from a comma-separated env value.
+func firstCSV(raw string) string {
+	if s := splitCSV(raw); len(s) > 0 {
+		return s[0]
+	}
+	return ""
 }

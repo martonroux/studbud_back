@@ -5,32 +5,51 @@ import (
 	"testing"
 )
 
-func TestRenderPromptGenPrompt_IncludesPromptAndStyle(t *testing.T) {
+func TestRenderPromptGenPrompt_IncludesPromptStyleAndCoverage(t *testing.T) {
 	out, err := renderPromptGenPrompt(PromptGenValues{
 		SubjectName: "Calc I",
-		Target:      5,
 		Style:       "standard",
+		Coverage:    "Balanced",
 		Focus:       "derivatives",
 		Prompt:      "Explain power rule",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Calc I", "5 flashcards", "standard", "derivatives", "Explain power rule", "items"} {
+	for _, want := range []string{"Calc I", "standard", "Balanced", "derivatives", "Explain power rule", "items"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in %q", want, out)
 		}
 	}
 }
 
-func TestRenderPromptGenPDF_AutoChaptersFlipsInstruction(t *testing.T) {
-	on, _ := renderPromptGenPDF(PDFGenValues{SubjectName: "S", Style: "detailed", Coverage: "comprehensive", CoverageHint: "thorough", AutoChapters: true})
-	off, _ := renderPromptGenPDF(PDFGenValues{SubjectName: "S", Style: "detailed", Coverage: "essentials", CoverageHint: "core", AutoChapters: false})
+func TestRenderPromptGenPrompt_AutoChaptersFlipsInstruction(t *testing.T) {
+	on, _ := renderPromptGenPrompt(PromptGenValues{SubjectName: "S", Style: "standard", Coverage: "Balanced", Prompt: "p", AutoChapters: true})
+	off, _ := renderPromptGenPrompt(PromptGenValues{SubjectName: "S", Style: "standard", Coverage: "Balanced", Prompt: "p", AutoChapters: false})
 	if !strings.Contains(on, "chapters\" array") {
 		t.Error("auto_chapters=true missing chapters instruction")
 	}
 	if strings.Contains(off, "You MAY propose chapter splits") {
 		t.Error("auto_chapters=false should not mention chapter proposal")
+	}
+}
+
+func TestRenderPromptGenPDF_AutoChaptersFlipsInstruction(t *testing.T) {
+	on, _ := renderPromptGenPDF(PDFGenValues{SubjectName: "S", Style: "detailed", Coverage: "Comprehensive", AutoChapters: true})
+	off, _ := renderPromptGenPDF(PDFGenValues{SubjectName: "S", Style: "detailed", Coverage: "Core", AutoChapters: false})
+	if !strings.Contains(on, "chapters\" array") {
+		t.Error("auto_chapters=true missing chapters instruction")
+	}
+	if strings.Contains(off, "You MAY propose chapter splits") {
+		t.Error("auto_chapters=false should not mention chapter proposal")
+	}
+}
+
+func TestCoverageHint_AllLevels(t *testing.T) {
+	for _, c := range []string{"Core", "Balanced", "Comprehensive"} {
+		if coverageHint(c) == "" {
+			t.Errorf("coverageHint(%q) empty", c)
+		}
 	}
 }
 

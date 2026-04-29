@@ -62,6 +62,22 @@ func (h *SubjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, sub)
 }
 
+// Stats handles GET /subject-stats?id=...
+func (h *SubjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	id, err := httpx.QueryInt64(r, "id")
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	out, err := h.svc.Stats(r.Context(), uid, id)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // Update handles POST /subject-update?id=...
 func (h *SubjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	uid := authctx.UID(r.Context())

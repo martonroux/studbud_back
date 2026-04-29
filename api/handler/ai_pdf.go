@@ -18,7 +18,7 @@ import (
 type pdfGenInput struct {
 	SubjectID    int64  // SubjectID is the target subject
 	ChapterID    int64  // ChapterID is optional; when set, suppresses auto-chapters
-	Coverage     string // Coverage is "essentials" | "balanced" | "comprehensive"
+	Coverage     string // Coverage is "Core" | "Balanced" | "Comprehensive"
 	Style        string // Style is "short" | "standard" | "detailed"
 	Focus        string // Focus is an optional narrowing phrase
 	AutoChapters bool   // AutoChapters requests proposed chapter splits
@@ -43,6 +43,10 @@ func (h *AIHandler) GenerateFromPDF(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	if !isValidCoverage(in.Coverage) {
+		httpx.WriteError(w, &myErrors.AppError{Code: "validation", Message: "coverage must be Core | Balanced | Comprehensive", Wrapped: myErrors.ErrValidation, Field: "coverage"})
+		return
+	}
 	rendered, err := renderPDFPrompt(in, subject.Name)
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -57,7 +61,6 @@ func renderPDFPrompt(in pdfGenInput, subjectName string) (string, error) {
 		SubjectName:  subjectName,
 		Style:        in.Style,
 		Coverage:     in.Coverage,
-		CoverageHint: coverageHint(in.Coverage),
 		Focus:        in.Focus,
 		AutoChapters: in.AutoChapters && in.ChapterID == 0,
 	})
@@ -76,7 +79,6 @@ func (h *AIHandler) runPDFGeneration(
 		PDFBytes:  in.PDFBytes,
 		PDFPages:  len(images),
 		Images:    images,
-		Schema:    defaultPDFItemsSchema(),
 		Metadata: map[string]any{
 			"coverage": in.Coverage, "style": in.Style, "focus": in.Focus,
 			"auto_chapters": in.AutoChapters, "chapter_id": in.ChapterID,
@@ -119,7 +121,7 @@ func parsePDFForm(r *http.Request) (pdfGenInput, error) {
 	return pdfGenInput{
 		SubjectID:    parseInt64Form(r, "subject_id"),
 		ChapterID:    parseInt64Form(r, "chapter_id"),
-		Coverage:     orDefaultStr(r.FormValue("coverage"), "balanced"),
+		Coverage:     orDefaultStr(r.FormValue("coverage"), "Balanced"),
 		Style:        orDefaultStr(r.FormValue("style"), "standard"),
 		Focus:        r.FormValue("focus"),
 		AutoChapters: r.FormValue("auto_chapters") == "true",
@@ -139,52 +141,14 @@ func readAllCapped(r io.Reader, limit int64) ([]byte, error) {
 	return buf, nil
 }
 
-// rasterizePDF turns a PDF byte slice into a per-page []ImagePart with a hard page cap of 30.
+// rasterizePDF turns a PDF byte slice into a per-page []ImagePart.
+// Page count is implicitly bounded by the 20 MB upload cap.
 func rasterizePDF(ctx context.Context, pdfBytes []byte) ([]aiProvider.ImagePart, error) {
-	imgs, err := aiProvider.PDFToImages(ctx, pdfBytes, aiProvider.PDFOptions{MaxPages: 30, PerPageTimeout: 30 * time.Second})
+	imgs, err := aiProvider.PDFToImages(ctx, pdfBytes, aiProvider.PDFOptions{PerPageTimeout: 30 * time.Second})
 	if err != nil {
 		return nil, &myErrors.AppError{Code: "pdf_unreadable", Message: err.Error(), Wrapped: myErrors.ErrValidation}
 	}
 	return imgs, nil
-}
-
-// coverageHint returns a short English hint for each coverage level.
-func coverageHint(c string) string {
-	switch c {
-	case "essentials":
-		return "cover only the most important 20%"
-	case "comprehensive":
-		return "cover everything substantive"
-	default:
-		return "cover the key 50%"
-	}
-}
-
-// defaultPDFItemsSchema extends the default items schema with chapters.
-func defaultPDFItemsSchema() []byte {
-	return []byte(`{
-      "type": "object",
-      "properties": {
-        "chapters": {
-          "type": "array",
-          "items": {"type": "object", "properties": {"index": {"type": "integer"}, "title": {"type": "string"}}}
-        },
-        "items": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "chapterIndex": {"type": ["integer","null"]},
-              "title":    {"type": "string"},
-              "question": {"type": "string"},
-              "answer":   {"type": "string"}
-            },
-            "required": ["question","answer"]
-          }
-        }
-      },
-      "required": ["items"]
-    }`)
 }
 
 // parseInt64Form parses a multipart form field into int64; 0 on absence/parse-error.

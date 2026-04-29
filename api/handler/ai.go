@@ -25,12 +25,13 @@ func NewAIHandler(svc *aipipeline.Service) *AIHandler {
 
 // promptGenInput is the POST /ai/flashcards/prompt body.
 type promptGenInput struct {
-	SubjectID   int64  `json:"subject_id"`   // SubjectID is the target subject
-	ChapterID   int64  `json:"chapter_id"`   // ChapterID is optional; when set, auto-chapters is suppressed
-	Prompt      string `json:"prompt"`       // Prompt is the user's topic description
-	TargetCount int    `json:"target_count"` // TargetCount is 0 (auto) or 1..50
-	Style       string `json:"style"`        // Style is "short" | "standard" | "detailed"
-	Focus       string `json:"focus"`        // Focus is an optional narrowing phrase
+	SubjectID    int64  `json:"subject_id"`    // SubjectID is the target subject
+	ChapterID    int64  `json:"chapter_id"`    // ChapterID is optional; when set, auto-chapters is suppressed
+	Prompt       string `json:"prompt"`        // Prompt is the user's topic description
+	Style        string `json:"style"`         // Style is "short" | "standard" | "detailed"
+	Coverage     string `json:"coverage"`      // Coverage is "Core" | "Balanced" | "Comprehensive"
+	Focus        string `json:"focus"`         // Focus is an optional narrowing phrase
+	AutoChapters bool   `json:"auto_chapters"` // AutoChapters proposes chapters when chapter_id is unset
 }
 
 // GenerateFromPrompt is the SSE endpoint for prompt-based flashcard generation.
@@ -56,9 +57,9 @@ func (h *AIHandler) GenerateFromPrompt(w http.ResponseWriter, r *http.Request) {
 		Feature:   aipipeline.FeatureGenerateFromPrompt,
 		SubjectID: in.SubjectID,
 		Prompt:    rendered,
-		Schema:    defaultItemsSchema(),
 		Metadata: map[string]any{
-			"style": in.Style, "focus": in.Focus, "target_count": in.TargetCount, "chapter_id": in.ChapterID,
+			"style": in.Style, "coverage": in.Coverage, "focus": in.Focus,
+			"auto_chapters": in.AutoChapters, "chapter_id": in.ChapterID,
 		},
 	})
 }
@@ -75,41 +76,32 @@ func decodePromptGen(r *http.Request) (promptGenInput, error) {
 	if in.Style == "" {
 		in.Style = "standard"
 	}
+	if in.Coverage == "" {
+		in.Coverage = "Balanced"
+	}
+	if !isValidCoverage(in.Coverage) {
+		return in, &myErrors.AppError{Code: "validation", Message: "coverage must be Core | Balanced | Comprehensive", Wrapped: myErrors.ErrValidation, Field: "coverage"}
+	}
 	return in, nil
+}
+
+// isValidCoverage returns true when c is one of the accepted coverage values.
+func isValidCoverage(c string) bool {
+	return c == "Core" || c == "Balanced" || c == "Comprehensive"
 }
 
 // renderPromptGenPromptExported is the package-external renderer used by the handler.
 func renderPromptGenPromptExported(in promptGenInput, subjectName string) (string, error) {
 	return aipipeline.RenderPromptGen(aipipeline.PromptGenValues{
-		SubjectName: subjectName,
-		Target:      in.TargetCount,
-		Style:       in.Style,
-		Focus:       in.Focus,
-		Prompt:      in.Prompt,
+		SubjectName:  subjectName,
+		Style:        in.Style,
+		Coverage:     in.Coverage,
+		Focus:        in.Focus,
+		Prompt:       in.Prompt,
+		AutoChapters: in.AutoChapters && in.ChapterID == 0,
 	})
 }
 
-// defaultItemsSchema returns the tool-use schema for a flashcard items array.
-func defaultItemsSchema() []byte {
-	return []byte(`{
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "title":    {"type": "string"},
-              "question": {"type": "string"},
-              "answer":   {"type": "string"}
-            },
-            "required": ["question", "answer"]
-          }
-        }
-      },
-      "required": ["items"]
-    }`)
-}
 
 // runGeneration invokes the pipeline and writes SSE events per emitted chunk.
 // First event is always job; then card / chapter / progress / terminal done / error.
@@ -129,10 +121,12 @@ func (h *AIHandler) runGeneration(ctx context.Context, w http.ResponseWriter, re
 }
 
 // setSSEHeaders writes the standard SSE content-type / cache headers.
+// X-Accel-Buffering disables proxy buffering (nginx and friends).
 func setSSEHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -150,6 +144,8 @@ func forwardChunkToSSE(w http.ResponseWriter, flusher http.Flusher, c aipipeline
 	switch c.Kind {
 	case aipipeline.ChunkItem:
 		writeSSE(w, flusher, "card", json.RawMessage(c.Item))
+	case aipipeline.ChunkChapter:
+		writeSSE(w, flusher, "chapter", json.RawMessage(c.Item))
 	case aipipeline.ChunkProgress:
 		writeSSE(w, flusher, "progress", c.Progress)
 	case aipipeline.ChunkDone:

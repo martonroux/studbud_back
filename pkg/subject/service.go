@@ -68,6 +68,36 @@ func (s *Service) Get(ctx context.Context, uid, subjectID int64) (*Subject, erro
 	return sub, nil
 }
 
+// Stats returns the per-difficulty card distribution for a subject the caller can read.
+func (s *Service) Stats(ctx context.Context, uid, subjectID int64) (*StatsResponse, error) {
+	level, err := s.access.SubjectLevel(ctx, uid, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	if level == access.LevelNone {
+		return nil, myErrors.ErrForbidden
+	}
+	out := &StatsResponse{}
+	err = s.db.QueryRow(ctx, `
+		SELECT
+			COUNT(*)                                   AS total,
+			COUNT(*) FILTER (WHERE last_result = 2)    AS good,
+			COUNT(*) FILTER (WHERE last_result = 1)    AS ok,
+			COUNT(*) FILTER (WHERE last_result = 0)    AS bad,
+			COUNT(*) FILTER (WHERE last_result = -1)   AS new_count
+		FROM flashcards
+		WHERE subject_id = $1
+	`, subjectID).Scan(&out.TotalCards, &out.GoodCount, &out.OkCount, &out.BadCount, &out.NewCount)
+	if err != nil {
+		return nil, fmt.Errorf("subject stats:\n%w", err)
+	}
+	out.CardsStudied = out.TotalCards - out.NewCount
+	if out.TotalCards > 0 {
+		out.MasteryPercent = (float64(out.GoodCount) + float64(out.OkCount)*0.5) / float64(out.TotalCards)
+	}
+	return out, nil
+}
+
 // ListOwned returns all subjects owned by uid, excluding archived when includeArchived=false.
 func (s *Service) ListOwned(ctx context.Context, uid int64, includeArchived bool) ([]Subject, error) {
 	rows, err := s.db.Query(ctx, `

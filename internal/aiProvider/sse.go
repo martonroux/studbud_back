@@ -49,19 +49,25 @@ func forwardEvent(payload string, out chan<- Chunk) {
 	}
 }
 
-// emitDelta extracts input_json_delta.partial_json and forwards it as a Chunk.
+// emitDelta forwards a Chunk for either tool-input deltas (schema-enforced
+// path used by Check) or text deltas (free-form streaming used by generation).
+// Forced tool_use deltas are buffered server-side by Anthropic until the call
+// completes, so generation must use text streaming to actually stream.
 func emitDelta(delta json.RawMessage, out chan<- Chunk) {
 	var d struct {
 		Type        string `json:"type"`
 		PartialJSON string `json:"partial_json"`
+		Text        string `json:"text"`
 	}
 	if json.Unmarshal(delta, &d) != nil {
 		return
 	}
-	if d.Type != "input_json_delta" {
-		return
+	switch d.Type {
+	case "input_json_delta":
+		out <- Chunk{Text: d.PartialJSON}
+	case "text_delta":
+		out <- Chunk{Text: d.Text}
 	}
-	out <- Chunk{Text: d.PartialJSON}
 }
 
 // drainAndCloseWithError consumes any response body so the HTTP connection can be reused.

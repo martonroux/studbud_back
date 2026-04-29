@@ -26,6 +26,7 @@ func testConfig(t *testing.T) *config.Config {
 		Env:         "test",                                 // Env selects the recorder emailer
 		Port:        "0",                                    // Port is unused; httptest picks its own
 		FrontendURL: "http://test.local",                    // FrontendURL is the CORS allowed origin
+		CORSOrigins: []string{"http://test.local"},          // CORSOrigins lists the origins echoed back
 		BackendURL:  "http://test.local",                    // BackendURL is used in image URLs
 		DatabaseURL: os.Getenv("DATABASE_URL"),              // DatabaseURL points at studbud_test
 		JWTSecret:   "test-secret-at-least-32-chars-long!!", // JWTSecret must be ≥32 bytes

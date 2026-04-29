@@ -23,8 +23,10 @@ const (
 type ChunkKind string
 
 const (
-	// ChunkItem carries one validated JSON item (e.g. a flashcard or a chapter).
+	// ChunkItem carries one validated flashcard JSON object.
 	ChunkItem ChunkKind = "item"
+	// ChunkChapter carries one validated chapter JSON object {index,title}.
+	ChunkChapter ChunkKind = "chapter"
 	// ChunkProgress carries an optional progress update.
 	ChunkProgress ChunkKind = "progress"
 	// ChunkDone marks successful stream termination.
