@@ -60,6 +60,9 @@ func (s *Service) ExtractKeywords(ctx context.Context, in ExtractInput) (*Keywor
 }
 
 // extractKeywordsSchema returns the tool-use JSON schema for keyword extraction.
+// minItems is 1 (not 5) because the prompt-level "5 to 12 keywords" target is a
+// soft instruction; the worker's post-processor enforces the floor and marks
+// jobs failed with last_error="empty_after_cleanup" when nothing survives cleanup.
 func extractKeywordsSchema() []byte {
 	return []byte(`{
       "type":"object",
