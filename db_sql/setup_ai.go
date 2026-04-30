@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS ai_quota_daily (
     PRIMARY KEY (user_id, day)
 );
 
+-- TEMPORARY: destructive realignment for Spec B.0 pre-launch (Plan B.0
+-- Task 1 — see docs/superpowers/plans/2026-04-30-flashcard-keyword-extraction.md).
+-- Replace with CREATE TABLE IF NOT EXISTS once all consumers reference the
+-- new column shape; tracked by the same plan's later tasks.
 DROP TABLE IF EXISTS flashcard_keywords;
 DROP TABLE IF EXISTS ai_extraction_jobs;
 
@@ -68,7 +72,7 @@ CREATE TABLE flashcard_keywords (
     weight  REAL    NOT NULL DEFAULT 1.0 CHECK (weight >= 0 AND weight <= 1),
     PRIMARY KEY (fc_id, keyword)
 );
-CREATE INDEX idx_flashcard_keywords_kw ON flashcard_keywords(keyword);
+CREATE INDEX IF NOT EXISTS idx_flashcard_keywords_kw ON flashcard_keywords(keyword);
 
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS subject_id      BIGINT NULL REFERENCES subjects(id)   ON DELETE SET NULL;
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS flashcard_id    BIGINT NULL REFERENCES flashcards(id) ON DELETE SET NULL;
