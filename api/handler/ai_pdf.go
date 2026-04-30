@@ -71,14 +71,16 @@ func (h *AIHandler) runPDFGeneration(
 	ctx context.Context, w http.ResponseWriter,
 	uid int64, in pdfGenInput, rendered string, images []aiProvider.ImagePart,
 ) {
+	autoChapters := in.AutoChapters && in.ChapterID == 0
 	req := aipipeline.AIRequest{
-		UserID:    uid,
-		Feature:   aipipeline.FeatureGenerateFromPDF,
-		SubjectID: in.SubjectID,
-		Prompt:    rendered,
-		PDFBytes:  in.PDFBytes,
-		PDFPages:  len(images),
-		Images:    images,
+		UserID:       uid,
+		Feature:      aipipeline.FeatureGenerateFromPDF,
+		SubjectID:    in.SubjectID,
+		Prompt:       rendered,
+		PDFBytes:     in.PDFBytes,
+		PDFPages:     len(images),
+		Images:       images,
+		DropChapters: !autoChapters,
 		Metadata: map[string]any{
 			"coverage": in.Coverage, "style": in.Style, "focus": in.Focus,
 			"auto_chapters": in.AutoChapters, "chapter_id": in.ChapterID,

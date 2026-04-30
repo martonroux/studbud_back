@@ -17,6 +17,8 @@ const (
 	FeatureGenerateFromPDF FeatureKey = "generate_pdf"
 	// FeatureCheckFlashcard is the AI-check of an existing flashcard.
 	FeatureCheckFlashcard FeatureKey = "check_flashcard"
+	// FeatureExtractKeywords is the background keyword-extraction worker (Spec B.0).
+	FeatureExtractKeywords FeatureKey = "extract_keywords"
 )
 
 // ChunkKind tags a streamed AIChunk.
@@ -62,6 +64,7 @@ type AIRequest struct {
 	Images      []aiProvider.ImagePart // Images is populated only for FeatureGenerateFromPDF (pre-rasterized)
 	Schema      json.RawMessage // Schema is the tool-use JSON schema for the expected output
 	Metadata    map[string]any  // Metadata is persisted into ai_jobs.metadata (style, focus, coverage...)
+	DropChapters bool           // DropChapters suppresses ChunkChapter emissions when chapters are disabled
 }
 
 // QuotaLimits holds per-feature daily caps.

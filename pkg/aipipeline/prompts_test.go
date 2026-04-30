@@ -32,6 +32,9 @@ func TestRenderPromptGenPrompt_AutoChaptersFlipsInstruction(t *testing.T) {
 	if strings.Contains(off, "You MAY propose chapter splits") {
 		t.Error("auto_chapters=false should not mention chapter proposal")
 	}
+	if !strings.Contains(off, "Do NOT propose chapters") {
+		t.Error("auto_chapters=false missing negative chapter instruction")
+	}
 }
 
 func TestRenderPromptGenPDF_AutoChaptersFlipsInstruction(t *testing.T) {
@@ -42,6 +45,9 @@ func TestRenderPromptGenPDF_AutoChaptersFlipsInstruction(t *testing.T) {
 	}
 	if strings.Contains(off, "You MAY propose chapter splits") {
 		t.Error("auto_chapters=false should not mention chapter proposal")
+	}
+	if !strings.Contains(off, "Do NOT propose chapters") {
+		t.Error("auto_chapters=false missing negative chapter instruction")
 	}
 }
 
@@ -59,6 +65,22 @@ func TestRenderPromptCheck_EmbedsAllFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"verdict", "findings", "suggestion", "Q?", "A."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output", want)
+		}
+	}
+}
+
+func TestRenderExtractKeywords_EmbedsAllFields(t *testing.T) {
+	out, err := RenderExtractKeywords(ExtractKeywordsValues{
+		Title:    "Mitose",
+		Question: "Quelles sont les phases de la mitose ?",
+		Answer:   "Prophase, métaphase, anaphase, télophase.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Mitose", "phases de la mitose", "Prophase", "keywords"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output", want)
 		}

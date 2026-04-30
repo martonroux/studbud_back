@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,10 @@ type Config struct {
 
 	AnthropicAPIKey string // AnthropicAPIKey is the Anthropic API key (Spec A)
 	AIModel         string // AIModel is the default model identifier
+
+	KeywordWorkers    int // KeywordWorkers is the number of concurrent keyword-extraction goroutines
+	KeywordRatePerMin int // KeywordRatePerMin is the global keyword-extraction API call cap
+	KeywordBurst      int // KeywordBurst is the rate-limiter burst for keyword extraction
 
 	StripeMode           string // StripeMode is "test" or "live"
 	StripeSecretKey      string // StripeSecretKey is the Stripe API secret
@@ -77,6 +82,10 @@ func loadFromEnv() *Config {
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 		AIModel:         getEnvDefault("AI_MODEL", "claude-sonnet-4-6"),
 
+		KeywordWorkers:    getEnvInt("KEYWORD_EXTRACT_WORKERS", 2),
+		KeywordRatePerMin: getEnvInt("KEYWORD_EXTRACT_RATE_PER_MIN", 60),
+		KeywordBurst:      getEnvInt("KEYWORD_EXTRACT_BURST", 120),
+
 		StripeMode:           getEnvDefault("STRIPE_MODE", "test"),
 		StripeSecretKey:      os.Getenv("STRIPE_SECRET_KEY"),
 		StripeWebhookSecret:  os.Getenv("STRIPE_WEBHOOK_SECRET"),
@@ -93,6 +102,21 @@ func getEnvDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// getEnvInt parses key as an int and returns it; returns fallback on missing or invalid input.
+func getEnvInt(key string, fallback int) int {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
+	}
+
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+
+	return n
 }
 
 // parseTTL parses a duration string and returns it or a wrapped error.

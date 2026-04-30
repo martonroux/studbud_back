@@ -40,25 +40,37 @@ CREATE TABLE IF NOT EXISTS ai_quota_daily (
     PRIMARY KEY (user_id, day)
 );
 
-CREATE TABLE IF NOT EXISTS ai_extraction_jobs (
-    id            BIGSERIAL PRIMARY KEY,
-    flashcard_id  BIGINT NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
-    status        TEXT NOT NULL DEFAULT 'pending',
-    attempts      INT NOT NULL DEFAULT 0,
-    last_error    TEXT NULL,
-    claimed_at    TIMESTAMPTZ NULL,
-    finished_at   TIMESTAMPTZ NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (flashcard_id),
-    CONSTRAINT ai_extraction_jobs_status_chk CHECK (status IN ('pending','claimed','succeeded','failed'))
-);
-CREATE INDEX IF NOT EXISTS idx_ai_extraction_jobs_status ON ai_extraction_jobs(status);
+-- TEMPORARY: destructive realignment for Spec B.0 pre-launch (Plan B.0
+-- Task 1 — see docs/superpowers/plans/2026-04-30-flashcard-keyword-extraction.md).
+-- Replace with CREATE TABLE IF NOT EXISTS once all consumers reference the
+-- new column shape; tracked by the same plan's later tasks.
+DROP TABLE IF EXISTS flashcard_keywords;
+DROP TABLE IF EXISTS ai_extraction_jobs;
 
-CREATE TABLE IF NOT EXISTS flashcard_keywords (
-    flashcard_id BIGINT NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
-    keyword      TEXT NOT NULL,
-    weight       REAL NOT NULL DEFAULT 1.0,
-    PRIMARY KEY (flashcard_id, keyword)
+CREATE TABLE ai_extraction_jobs (
+    id           BIGSERIAL    PRIMARY KEY,
+    fc_id        BIGINT       NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+    priority     SMALLINT     NOT NULL DEFAULT 0,
+    state        TEXT         NOT NULL CHECK (state IN ('pending','running','done','failed')),
+    attempts     SMALLINT     NOT NULL DEFAULT 0,
+    last_error   TEXT,
+    enqueued_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    started_at   TIMESTAMPTZ,
+    finished_at  TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uniq_extraction_in_flight
+    ON ai_extraction_jobs (fc_id)
+    WHERE state IN ('pending','running');
+CREATE INDEX idx_extraction_pickup
+    ON ai_extraction_jobs (priority DESC, enqueued_at ASC)
+    WHERE state = 'pending';
+
+CREATE TABLE flashcard_keywords (
+    fc_id   BIGINT  NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+    keyword TEXT    NOT NULL,
+    weight  REAL    NOT NULL DEFAULT 1.0 CHECK (weight >= 0 AND weight <= 1),
+    PRIMARY KEY (fc_id, keyword)
 );
 CREATE INDEX IF NOT EXISTS idx_flashcard_keywords_kw ON flashcard_keywords(keyword);
 
@@ -69,6 +81,14 @@ ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS items_emitted   INT    NOT NULL DEF
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS items_dropped   INT    NOT NULL DEFAULT 0;
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS error_kind      TEXT   NULL;
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_user_running ON ai_jobs(user_id) WHERE status = 'running';
+
+-- Backfill: enqueue keyword extraction for every existing flashcard at the
+-- lowest priority (-1). The partial unique index on (fc_id) WHERE state IN
+-- ('pending','running') makes re-runs idempotent, so this can fire on every
+-- boot without producing duplicates.
+INSERT INTO ai_extraction_jobs (fc_id, priority, state)
+SELECT id, -1, 'pending' FROM flashcards
+ON CONFLICT (fc_id) WHERE state IN ('pending','running') DO NOTHING;
 `
 
 func setupAI(ctx context.Context, pool *pgxpool.Pool) error {
