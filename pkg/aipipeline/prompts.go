@@ -92,6 +92,13 @@ type CheckValues struct {
 	Answer      string // Answer is the flashcard answer
 }
 
+// ExtractKeywordsValues is the template input for the keyword-extraction feature.
+type ExtractKeywordsValues struct {
+	Title    string // Title is the flashcard title (may be empty)
+	Question string // Question is the flashcard prompt
+	Answer   string // Answer is the flashcard answer
+}
+
 // promptGenData augments PromptGenValues with the resolved coverage hint
 // before template execution.
 type promptGenData struct {
@@ -127,3 +134,8 @@ func RenderPDFGen(v PDFGenValues) (string, error) { return renderPromptGenPDF(v)
 
 // RenderCheck is the exported wrapper for the check-flashcard template.
 func RenderCheck(v CheckValues) (string, error) { return renderPromptCheck(v) }
+
+// RenderExtractKeywords is the exported wrapper for the keyword-extraction template.
+func RenderExtractKeywords(v ExtractKeywordsValues) (string, error) {
+	return renderTemplate("prompts/extract_keywords.tmpl", v)
+}

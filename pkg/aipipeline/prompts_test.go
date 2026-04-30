@@ -70,3 +70,19 @@ func TestRenderPromptCheck_EmbedsAllFields(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderExtractKeywords_EmbedsAllFields(t *testing.T) {
+	out, err := RenderExtractKeywords(ExtractKeywordsValues{
+		Title:    "Mitose",
+		Question: "Quelles sont les phases de la mitose ?",
+		Answer:   "Prophase, métaphase, anaphase, télophase.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Mitose", "phases de la mitose", "Prophase", "keywords"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output", want)
+		}
+	}
+}
