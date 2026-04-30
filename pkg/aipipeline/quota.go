@@ -10,12 +10,12 @@ import (
 
 // quotaRow is the per-user per-day counter tuple we read before a call.
 type quotaRow struct {
-	PromptCalls            int // PromptCalls is today's prompt generation count
-	PDFCalls               int // PDFCalls is today's PDF generation count
-	PDFPages               int // PDFPages is today's PDF page consumption
-	CheckCalls             int // CheckCalls is today's check-flashcard count
-	PlanCalls              int // PlanCalls is today's revision-plan generation count
-	CrossSubjectRankCalls  int // CrossSubjectRankCalls is today's cross-subject rank count
+	PromptCalls           int // PromptCalls is today's prompt generation count
+	PDFCalls              int // PDFCalls is today's PDF generation count
+	PDFPages              int // PDFPages is today's PDF page consumption
+	CheckCalls            int // CheckCalls is today's check-flashcard count
+	PlanCalls             int // PlanCalls is today's revision-plan generation count
+	CrossSubjectRankCalls int // CrossSubjectRankCalls is today's cross-subject rank count
 }
 
 // QuotaBucket is one feature's used/limit/reset tuple as surfaced to clients.
@@ -99,11 +99,11 @@ func checkAgainstLimitsPure(feat FeatureKey, used map[string]int, limits QuotaLi
 // checkAgainstLimits returns an ErrQuotaExhausted if the feature is over cap.
 func checkAgainstLimits(row quotaRow, feat FeatureKey, pdfPages int, lim QuotaLimits) error {
 	used := map[string]int{
-		"prompt_calls":            row.PromptCalls,
-		"pdf_calls":               row.PDFCalls,
-		"pdf_pages":               row.PDFPages,
-		"check_calls":             row.CheckCalls,
-		"plan_calls":              row.PlanCalls,
+		"prompt_calls":             row.PromptCalls,
+		"pdf_calls":                row.PDFCalls,
+		"pdf_pages":                row.PDFPages,
+		"check_calls":              row.CheckCalls,
+		"plan_calls":               row.PlanCalls,
 		"cross_subject_rank_calls": row.CrossSubjectRankCalls,
 	}
 	return checkAgainstLimitsPure(feat, used, lim, pdfPages)
