@@ -27,6 +27,13 @@ func NewService(db *pgxpool.Pool, provider aiProvider.Client, access *access.Ser
 	return &Service{db: db, provider: provider, access: access, limits: limits, model: model}
 }
 
+// NewServiceForTest constructs a minimal Service for tests that exercise the
+// extraction or check primitives without the entitlement / quota plumbing.
+// Production must use NewService.
+func NewServiceForTest(db *pgxpool.Pool, provider aiProvider.Client, model string) *Service {
+	return &Service{db: db, provider: provider, model: model}
+}
+
 // isNoRows returns true when err is pgx's "no rows" sentinel.
 func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
