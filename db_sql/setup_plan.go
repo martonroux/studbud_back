@@ -45,15 +45,6 @@ CREATE TABLE revision_plan_progress (
     PRIMARY KEY (user_id, fc_id, plan_date)
 );
 CREATE INDEX idx_rpp_user_today ON revision_plan_progress (user_id, plan_date);
-
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quizzes_plan_id_fkey') THEN
-        ALTER TABLE quizzes
-            ADD CONSTRAINT quizzes_plan_id_fkey
-            FOREIGN KEY (plan_id) REFERENCES revision_plans(id) ON DELETE SET NULL;
-    END IF;
-END $$;
 `
 
 func setupPlan(ctx context.Context, pool *pgxpool.Pool) error {
