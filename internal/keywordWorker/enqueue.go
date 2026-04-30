@@ -1,6 +1,45 @@
 package keywordWorker
 
-import "math"
+import (
+	"context"
+	"fmt"
+	"math"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Priority is an enqueue ordering hint. Higher = picked first.
+type Priority int16
+
+const (
+	// PriorityBackfill is reserved for migration-time bulk enqueue.
+	PriorityBackfill Priority = -1
+	// PriorityRetry is used when re-enqueueing after a transient failure.
+	PriorityRetry Priority = 0
+	// PriorityUser is the default for create/update-triggered jobs.
+	PriorityUser Priority = 1
+)
+
+// Enqueuer inserts (and dedups) keyword-extraction jobs.
+// Implements pkg/flashcard.KeywordEnqueuer.
+type Enqueuer struct {
+	db *pgxpool.Pool // db is the shared pool
+}
+
+// NewEnqueuer constructs an Enqueuer.
+func NewEnqueuer(db *pgxpool.Pool) *Enqueuer {
+	return &Enqueuer{db: db}
+}
+
+// EnqueueForFlashcard inserts a pending job for fcID, or bumps the priority of
+// an existing pending/running row to max(existing, prio).
+func (e *Enqueuer) EnqueueForFlashcard(ctx context.Context, fcID int64, prio Priority) error {
+	if _, err := e.db.Exec(ctx, sqlEnqueueJob, fcID, int16(prio)); err != nil {
+		return fmt.Errorf("enqueue extraction job %d:\n%w", fcID, err)
+	}
+
+	return nil
+}
 
 // MaterialChange returns true when the (oldQ,oldA) → (newQ,newA) edit is large enough
 // that re-extracting keywords is worth the AI call.
