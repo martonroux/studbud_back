@@ -3,6 +3,7 @@ package keywordWorker
 import (
 	"context"
 	"testing"
+	"time"
 
 	"studbud/backend/internal/aiProvider"
 	"studbud/backend/pkg/aipipeline"
@@ -103,4 +104,56 @@ func TestRunOnce_EmptyAfterCleanupMarksFailed(t *testing.T) {
 	if state != "failed" || lastErr != "empty_after_cleanup" {
 		t.Errorf("want failed/empty_after_cleanup, got %s/%s", state, lastErr)
 	}
+}
+
+func TestWorker_ProcessesMultipleJobs(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+
+	uid := testutil.NewVerifiedUser(t, pool).ID
+	subj := testutil.NewSubject(t, pool, uid)
+
+	const N = 5
+
+	fcs := make([]int64, N)
+
+	for i := 0; i < N; i++ {
+		fcs[i] = testutil.NewFlashcard(t, pool, subj.ID, 0, "Q", "A")
+	}
+
+	enq := NewEnqueuer(pool)
+
+	for _, id := range fcs {
+		if err := enq.EnqueueForFlashcard(context.Background(), id, PriorityUser); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prov := &fakeProv{body: `{"keywords":[{"keyword":"x","weight":0.5}]}`}
+	ai := aipipeline.NewServiceForTest(pool, prov, "claude-test")
+
+	w := New(pool, ai, Config{Workers: 2, RatePerMin: 6000, Burst: 100, PollInterval: 10 * time.Millisecond})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	w.Start(ctx)
+
+	deadline := time.Now().Add(3 * time.Second)
+
+	for time.Now().Before(deadline) {
+		var done int
+
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM ai_extraction_jobs WHERE state='done' AND fc_id = ANY($1)`, fcs).Scan(&done)
+
+		if done == N {
+			cancel()
+			w.Stop()
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatalf("worker did not process %d jobs in time", N)
 }

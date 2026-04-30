@@ -124,7 +124,7 @@ func buildInfra(cfg *config.Config, pool *pgxpool.Pool) (infra, error) {
 		store:     store,
 		emailer:   buildEmailer(cfg),
 		scheduler: cron.New(),
-		worker:    keywordWorker.New(),
+		worker:    keywordWorker.New(nil, nil, keywordWorker.Config{}), // wired for real in Task 12
 		aiClient:  selectAIClient(cfg),
 		billing:   billingadapter.NoopClient{},
 		hub:       duelHub.New(),
