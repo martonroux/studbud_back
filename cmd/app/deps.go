@@ -158,7 +158,7 @@ func buildDomainServices(cfg *config.Config, pool *pgxpool.Pool, inf infra) doma
 		image:        image.NewService(pool, inf.store, cfg.BackendURL),
 		subject:      subject.NewService(pool, acc),
 		chapter:      chapter.NewService(pool, acc),
-		flashcard:    flashcard.NewService(pool, acc),
+		flashcard:    flashcard.NewService(pool, acc, nil),
 		search:       search.NewService(pool),
 		friendship:   friendship.NewService(pool),
 		subjectSub:   subjectsub.NewService(pool, acc),

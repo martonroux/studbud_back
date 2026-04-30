@@ -14,7 +14,7 @@ func TestFlashcardCRUD(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	testutil.Reset(t, db)
 	acc := access.NewService(db)
-	svc := flashcard.NewService(db, acc)
+	svc := flashcard.NewService(db, acc, nil)
 
 	owner := testutil.NewVerifiedUser(t, db)
 	sub := testutil.NewSubject(t, db, owner.ID)
@@ -49,7 +49,7 @@ func TestFlashcard_RejectBadResult(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	testutil.Reset(t, db)
 	acc := access.NewService(db)
-	svc := flashcard.NewService(db, acc)
+	svc := flashcard.NewService(db, acc, nil)
 
 	owner := testutil.NewVerifiedUser(t, db)
 	sub := testutil.NewSubject(t, db, owner.ID)

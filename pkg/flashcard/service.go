@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,15 +14,34 @@ import (
 	"studbud/backend/pkg/access"
 )
 
-// Service owns flashcard CRUD and lightweight review tracking.
-type Service struct {
-	db     *pgxpool.Pool   // db is the shared pool
-	access *access.Service // access enforces subject-scoped permissions
+// KeywordEnqueuer is the seam the flashcard service uses to trigger keyword
+// re-indexing on create/update. Implemented by internal/keywordWorker.
+type KeywordEnqueuer interface {
+	// EnqueueForFlashcard schedules keyword extraction for fcID.
+	// Errors are best-effort; callers log and continue.
+	EnqueueForFlashcard(ctx context.Context, fcID int64, prio int16) error
 }
 
-// NewService constructs a Service.
-func NewService(db *pgxpool.Pool, acc *access.Service) *Service {
-	return &Service{db: db, access: acc}
+// noopEnqueuer is the test/default enqueuer that drops calls silently.
+type noopEnqueuer struct{}
+
+// EnqueueForFlashcard is a no-op.
+func (noopEnqueuer) EnqueueForFlashcard(context.Context, int64, int16) error { return nil }
+
+// Service owns flashcard CRUD and lightweight review tracking.
+type Service struct {
+	db       *pgxpool.Pool   // db is the shared pool
+	access   *access.Service // access enforces subject-scoped permissions
+	enqueuer KeywordEnqueuer // enqueuer triggers async keyword re-extraction (best-effort)
+}
+
+// NewService constructs a Service. enqueuer may be nil; a no-op is installed.
+func NewService(db *pgxpool.Pool, acc *access.Service, enqueuer KeywordEnqueuer) *Service {
+	if enqueuer == nil {
+		enqueuer = noopEnqueuer{}
+	}
+
+	return &Service{db: db, access: acc, enqueuer: enqueuer}
 }
 
 // Create inserts a flashcard.
@@ -41,6 +61,9 @@ func (s *Service) Create(ctx context.Context, uid int64, in CreateInput) (*Flash
 	fc, err := s.insert(ctx, in)
 	if err != nil {
 		return nil, err
+	}
+	if err := s.enqueuer.EnqueueForFlashcard(ctx, fc.ID, 1); err != nil {
+		log.Printf("flashcard.Create: enqueue keyword extraction failed for fc %d: %v", fc.ID, err)
 	}
 	return fc, nil
 }
@@ -87,6 +110,7 @@ func (s *Service) Update(ctx context.Context, uid, id int64, in UpdateInput) (*F
 	if err := s.ensureEdit(ctx, uid, fc.SubjectID); err != nil {
 		return nil, err
 	}
+	oldQ, oldA := fc.Question, fc.Answer
 	title, question, answer, chapterID, imageID, err := applyFlashcardPatch(fc, in)
 	if err != nil {
 		return nil, err
@@ -106,8 +130,19 @@ func (s *Service) Update(ctx context.Context, uid, id int64, in UpdateInput) (*F
 	if err != nil {
 		return nil, fmt.Errorf("update flashcard:\n%w", err)
 	}
+	if shouldReindex(oldQ, oldA, out.Question, out.Answer) {
+		if err := s.enqueuer.EnqueueForFlashcard(ctx, out.ID, 1); err != nil {
+			log.Printf("flashcard.Update: enqueue keyword extraction failed for fc %d: %v", out.ID, err)
+		}
+	}
 	return &out, nil
 }
+
+// shouldReindex is the seam used by Update to decide whether keyword extraction
+// is worth re-running. Defined as a package-level variable so cmd/app can wire
+// it to internal/keywordWorker.MaterialChange without an import cycle. The
+// default (always true) is safe for tests where the enqueuer is a no-op.
+var shouldReindex = func(oldQ, oldA, newQ, newA string) bool { return true }
 
 // applyFlashcardPatch merges UpdateInput fields onto the existing Flashcard values.
 // Returns patched field values or ErrInvalidInput for empty question/answer.
