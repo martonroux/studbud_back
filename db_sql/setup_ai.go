@@ -81,6 +81,14 @@ ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS items_emitted   INT    NOT NULL DEF
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS items_dropped   INT    NOT NULL DEFAULT 0;
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS error_kind      TEXT   NULL;
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_user_running ON ai_jobs(user_id) WHERE status = 'running';
+
+-- Backfill: enqueue keyword extraction for every existing flashcard at the
+-- lowest priority (-1). The partial unique index on (fc_id) WHERE state IN
+-- ('pending','running') makes re-runs idempotent, so this can fire on every
+-- boot without producing duplicates.
+INSERT INTO ai_extraction_jobs (fc_id, priority, state)
+SELECT id, -1, 'pending' FROM flashcards
+ON CONFLICT (fc_id) WHERE state IN ('pending','running') DO NOTHING;
 `
 
 func setupAI(ctx context.Context, pool *pgxpool.Pool) error {
