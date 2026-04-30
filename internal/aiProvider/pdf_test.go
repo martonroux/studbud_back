@@ -36,6 +36,24 @@ func TestPDFToImages_ReturnsOneJPEGPerPage(t *testing.T) {
 	}
 }
 
+func TestPDFPageCount_RejectsEmptyBytes(t *testing.T) {
+	_, err := aiProvider.PDFPageCount(nil)
+	if err == nil {
+		t.Error("want error on nil bytes")
+	}
+}
+
+func TestPDFPageCount_ValidPDF(t *testing.T) {
+	pdf := loadTestPDF(t)
+	n, err := aiProvider.PDFPageCount(pdf)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n < 1 {
+		t.Errorf("want >= 1 page, got %d", n)
+	}
+}
+
 func loadTestPDF(t *testing.T) []byte {
 	t.Helper()
 	path := filepath.Join("testdata", "sample.pdf")
