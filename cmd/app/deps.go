@@ -92,6 +92,10 @@ func buildDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	dom := buildDomainServices(cfg, pool, inf)
 	stubs := buildStubServices(cfg, pool, inf, dom.access)
 
+	worker, enq := wireKeywordWorker(pool, cfg, stubs.ai)
+	inf.worker = worker
+	dom.flashcard = flashcard.NewService(pool, dom.access, enq)
+
 	d := assembleDeps(cfg, pool, inf, dom, stubs)
 	return d, cleanup, nil
 }
@@ -124,11 +128,41 @@ func buildInfra(cfg *config.Config, pool *pgxpool.Pool) (infra, error) {
 		store:     store,
 		emailer:   buildEmailer(cfg),
 		scheduler: cron.New(),
-		worker:    keywordWorker.New(nil, nil, keywordWorker.Config{}), // wired for real in Task 12
+		worker:    nil, // wired by wireKeywordWorker after the aipipeline service exists
 		aiClient:  selectAIClient(cfg),
 		billing:   billingadapter.NoopClient{},
 		hub:       duelHub.New(),
 	}, nil
+}
+
+// wireKeywordWorker constructs the keyword worker (depends on aipipeline.Service)
+// and the enqueuer that bridges to flashcard.KeywordEnqueuer. It also points
+// flashcard.shouldReindex at MaterialChange. Call after stub services are built.
+func wireKeywordWorker(pool *pgxpool.Pool, cfg *config.Config, ai *aipipeline.Service) (*keywordWorker.Worker, flashcard.KeywordEnqueuer) {
+	enq := keywordWorker.NewEnqueuer(pool)
+
+	w := keywordWorker.New(pool, ai, keywordWorker.Config{
+		Workers:    cfg.KeywordWorkers,
+		RatePerMin: cfg.KeywordRatePerMin,
+		Burst:      cfg.KeywordBurst,
+	})
+
+	flashcard.SetReindexPredicate(keywordWorker.MaterialChange)
+
+	return w, enqueuerAdapter{inner: enq}
+}
+
+// enqueuerAdapter bridges *keywordWorker.Enqueuer (Priority) to
+// flashcard.KeywordEnqueuer (int16). Keeps pkg/flashcard free of an
+// internal/keywordWorker import.
+type enqueuerAdapter struct {
+	inner *keywordWorker.Enqueuer // inner is the real DB-backed enqueuer
+}
+
+// EnqueueForFlashcard forwards to the inner enqueuer with the priority
+// converted to keywordWorker.Priority.
+func (a enqueuerAdapter) EnqueueForFlashcard(ctx context.Context, fcID int64, prio int16) error {
+	return a.inner.EnqueueForFlashcard(ctx, fcID, keywordWorker.Priority(prio))
 }
 
 // domainSvcs groups all domain-layer services.
@@ -242,6 +276,9 @@ func mustBuildDepsWithFake(t TestingT, pool *pgxpool.Pool, cfg *config.Config, f
 	inf.aiClient = fake
 	dom := buildDomainServices(cfg, pool, inf)
 	stubs := buildStubServices(cfg, pool, inf, dom.access)
+	worker, enq := wireKeywordWorker(pool, cfg, stubs.ai)
+	inf.worker = worker
+	dom.flashcard = flashcard.NewService(pool, dom.access, enq)
 	d := assembleDeps(cfg, pool, inf, dom, stubs)
 	return d, func() {}
 }

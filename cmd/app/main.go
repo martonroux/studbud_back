@@ -49,7 +49,15 @@ func run() error {
 			return err
 		},
 	})
+	d.scheduler.Register(cron.Job{
+		Name:     "keywordExtractionReaper",
+		Interval: time.Minute,
+		Run: func(ctx context.Context) error {
+			return reapStuckExtractionJobs(ctx, d)
+		},
+	})
 	d.scheduler.Start(ctx)
+	d.worker.Start(ctx)
 
 	srv := newServer(cfg, d)
 	go serve(srv, cfg.Port)
@@ -57,8 +65,29 @@ func run() error {
 	<-ctx.Done()
 	log.Print("shutting down")
 	err = shutdown(srv)
+	d.worker.Stop()
 	d.scheduler.Wait()
 	return err
+}
+
+// reapStuckExtractionJobs resets ai_extraction_jobs rows that have been in
+// 'running' for more than 5 minutes — defends against worker crashes mid-job.
+func reapStuckExtractionJobs(ctx context.Context, d *deps) error {
+	tag, err := d.db.Exec(ctx, `
+		UPDATE ai_extraction_jobs
+		SET state='pending', attempts=attempts+1,
+		    last_error='reaped: running > 5m', updated_at=now(), started_at=NULL
+		WHERE state='running' AND started_at < now() - interval '5 minutes'
+	`)
+	if err != nil {
+		return fmt.Errorf("reap extraction jobs:\n%w", err)
+	}
+
+	if n := tag.RowsAffected(); n > 0 {
+		log.Printf("keywordWorker: reaped %d stuck running jobs", n)
+	}
+
+	return nil
 }
 
 // newServer builds the http.Server with the wired router and safe header timeout.

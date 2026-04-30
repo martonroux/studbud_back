@@ -144,6 +144,15 @@ func (s *Service) Update(ctx context.Context, uid, id int64, in UpdateInput) (*F
 // default (always true) is safe for tests where the enqueuer is a no-op.
 var shouldReindex = func(oldQ, oldA, newQ, newA string) bool { return true }
 
+// SetReindexPredicate replaces the package-level shouldReindex var. Wired from
+// cmd/app/deps.go to point at internal/keywordWorker.MaterialChange. A nil fn
+// is ignored.
+func SetReindexPredicate(fn func(oldQ, oldA, newQ, newA string) bool) {
+	if fn != nil {
+		shouldReindex = fn
+	}
+}
+
 // applyFlashcardPatch merges UpdateInput fields onto the existing Flashcard values.
 // Returns patched field values or ErrInvalidInput for empty question/answer.
 func applyFlashcardPatch(fc *Flashcard, in UpdateInput) (title, question, answer string, chapterID *int64, imageID *string, err error) {
