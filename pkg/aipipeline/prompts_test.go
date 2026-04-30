@@ -86,3 +86,23 @@ func TestRenderExtractKeywords_EmbedsAllFields(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderCrossSubjectRank_IncludesAllInputs(t *testing.T) {
+	out, err := RenderCrossSubjectRank(CrossSubjectRankValues{
+		ExamSubject: "Biologie Cellulaire",
+		ExamTitle:   "Partiel mitose",
+		Candidates: []CrossSubjectCandidate{
+			{ID: 12, Title: "Cycle cellulaire", SubjectName: "Microbiologie", Keywords: []string{"mitose", "cycle"}, OverlapScore: 2},
+			{ID: 13, Title: "ADN", SubjectName: "Biochimie", Keywords: []string{"chromosome"}, OverlapScore: 1},
+		},
+		TopK: 15,
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{"Biologie Cellulaire", "Partiel mitose", "Cycle cellulaire", "Microbiologie", "mitose", "15"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}

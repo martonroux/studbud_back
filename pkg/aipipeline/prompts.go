@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"strings"
 	"sync"
 	"text/template"
 )
@@ -57,7 +58,9 @@ func loadTemplate(path string) (*template.Template, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s:\n%w", path, err)
 	}
-	tmpl, err := template.New(path).Parse(string(raw))
+	tmpl, err := template.New(path).Funcs(template.FuncMap{
+		"join": strings.Join,
+	}).Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("parse %s:\n%w", path, err)
 	}
@@ -138,4 +141,26 @@ func RenderCheck(v CheckValues) (string, error) { return renderPromptCheck(v) }
 // RenderExtractKeywords is the exported wrapper for the keyword-extraction template.
 func RenderExtractKeywords(v ExtractKeywordsValues) (string, error) {
 	return renderTemplate("prompts/extract_keywords.tmpl", v)
+}
+
+// CrossSubjectCandidate is one shortlist row passed to the ranker prompt.
+type CrossSubjectCandidate struct {
+	ID           int64    // ID is the flashcard id
+	Title        string   // Title is the flashcard title
+	SubjectName  string   // SubjectName is the source subject's display name
+	Keywords     []string // Keywords are the AI-extracted keywords for this card
+	OverlapScore int      // OverlapScore is the count of shared keywords with the exam subject
+}
+
+// CrossSubjectRankValues drives the cross-subject ranker template.
+type CrossSubjectRankValues struct {
+	ExamSubject string                  // ExamSubject is the exam's subject name
+	ExamTitle   string                  // ExamTitle helps the model focus on the exam topic
+	Candidates  []CrossSubjectCandidate // Candidates is the keyword-overlap shortlist
+	TopK        int                     // TopK is the number of cards the model should select
+}
+
+// RenderCrossSubjectRank renders the cross-subject ranker prompt.
+func RenderCrossSubjectRank(v CrossSubjectRankValues) (string, error) {
+	return renderTemplate("prompts/cross_subject_rank.tmpl", v)
 }
