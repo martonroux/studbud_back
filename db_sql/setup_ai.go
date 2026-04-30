@@ -40,27 +40,35 @@ CREATE TABLE IF NOT EXISTS ai_quota_daily (
     PRIMARY KEY (user_id, day)
 );
 
-CREATE TABLE IF NOT EXISTS ai_extraction_jobs (
-    id            BIGSERIAL PRIMARY KEY,
-    flashcard_id  BIGINT NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
-    status        TEXT NOT NULL DEFAULT 'pending',
-    attempts      INT NOT NULL DEFAULT 0,
-    last_error    TEXT NULL,
-    claimed_at    TIMESTAMPTZ NULL,
-    finished_at   TIMESTAMPTZ NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (flashcard_id),
-    CONSTRAINT ai_extraction_jobs_status_chk CHECK (status IN ('pending','claimed','succeeded','failed'))
-);
-CREATE INDEX IF NOT EXISTS idx_ai_extraction_jobs_status ON ai_extraction_jobs(status);
+DROP TABLE IF EXISTS flashcard_keywords;
+DROP TABLE IF EXISTS ai_extraction_jobs;
 
-CREATE TABLE IF NOT EXISTS flashcard_keywords (
-    flashcard_id BIGINT NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
-    keyword      TEXT NOT NULL,
-    weight       REAL NOT NULL DEFAULT 1.0,
-    PRIMARY KEY (flashcard_id, keyword)
+CREATE TABLE ai_extraction_jobs (
+    id           BIGSERIAL    PRIMARY KEY,
+    fc_id        BIGINT       NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+    priority     SMALLINT     NOT NULL DEFAULT 0,
+    state        TEXT         NOT NULL CHECK (state IN ('pending','running','done','failed')),
+    attempts     SMALLINT     NOT NULL DEFAULT 0,
+    last_error   TEXT,
+    enqueued_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    started_at   TIMESTAMPTZ,
+    finished_at  TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS idx_flashcard_keywords_kw ON flashcard_keywords(keyword);
+CREATE UNIQUE INDEX uniq_extraction_in_flight
+    ON ai_extraction_jobs (fc_id)
+    WHERE state IN ('pending','running');
+CREATE INDEX idx_extraction_pickup
+    ON ai_extraction_jobs (priority DESC, enqueued_at ASC)
+    WHERE state = 'pending';
+
+CREATE TABLE flashcard_keywords (
+    fc_id   BIGINT  NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+    keyword TEXT    NOT NULL,
+    weight  REAL    NOT NULL DEFAULT 1.0 CHECK (weight >= 0 AND weight <= 1),
+    PRIMARY KEY (fc_id, keyword)
+);
+CREATE INDEX idx_flashcard_keywords_kw ON flashcard_keywords(keyword);
 
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS subject_id      BIGINT NULL REFERENCES subjects(id)   ON DELETE SET NULL;
 ALTER TABLE ai_jobs ADD COLUMN IF NOT EXISTS flashcard_id    BIGINT NULL REFERENCES flashcards(id) ON DELETE SET NULL;
