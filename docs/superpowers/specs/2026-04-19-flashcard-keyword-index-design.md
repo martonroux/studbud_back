@@ -77,9 +77,11 @@ CREATE UNIQUE INDEX uniq_extraction_in_flight
     ON ai_extraction_jobs (fc_id)
     WHERE state IN ('pending', 'running');
 
--- Worker pick order
+-- Worker pick order. The leading `state` column is redundant under the
+-- `WHERE state = 'pending'` predicate, so the index key is just
+-- (priority DESC, enqueued_at ASC).
 CREATE INDEX idx_extraction_pickup
-    ON ai_extraction_jobs (state, priority DESC, enqueued_at ASC)
+    ON ai_extraction_jobs (priority DESC, enqueued_at ASC)
     WHERE state = 'pending';
 ```
 
