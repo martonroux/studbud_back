@@ -17,6 +17,8 @@ const (
 	FeatureGenerateFromPDF FeatureKey = "generate_pdf"
 	// FeatureCheckFlashcard is the AI-check of an existing flashcard.
 	FeatureCheckFlashcard FeatureKey = "check_flashcard"
+	// FeatureExtractKeywords is the background keyword-extraction worker (Spec B.0).
+	FeatureExtractKeywords FeatureKey = "extract_keywords"
 )
 
 // ChunkKind tags a streamed AIChunk.
