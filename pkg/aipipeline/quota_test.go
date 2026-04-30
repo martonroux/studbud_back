@@ -96,3 +96,19 @@ func TestQuotaSnapshot_ReflectsDebits(t *testing.T) {
 		t.Error("AIAccess = false, want true")
 	}
 }
+
+func TestCheckAgainstLimits_PlanFeature(t *testing.T) {
+	limits := aipipeline.QuotaLimits{PlanCalls: 1}
+	used := map[string]int{"plan_calls": 1, "cross_subject_rank_calls": 0}
+	if err := aipipeline.CheckAgainstLimitsForTest(aipipeline.FeatureGenerateRevisionPlan, used, limits, 0); err == nil {
+		t.Error("want quota exhausted at limit, got nil")
+	}
+}
+
+func TestCheckAgainstLimits_CrossSubjectRankNeverDebits(t *testing.T) {
+	limits := aipipeline.QuotaLimits{PlanCalls: 1}
+	used := map[string]int{"plan_calls": 0, "cross_subject_rank_calls": 999}
+	if err := aipipeline.CheckAgainstLimitsForTest(aipipeline.FeatureCrossSubjectRank, used, limits, 0); err != nil {
+		t.Errorf("cross-subject rank should always pass quota check, got %v", err)
+	}
+}
