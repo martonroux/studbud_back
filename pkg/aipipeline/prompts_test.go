@@ -106,3 +106,28 @@ func TestRenderCrossSubjectRank_IncludesAllInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderRevisionPlan_IncludesAllSections(t *testing.T) {
+	out, err := RenderRevisionPlan(RevisionPlanValues{
+		ExamDate:      "2026-06-15",
+		DaysRemaining: 30,
+		ExamTitle:     "Partiel Biologie",
+		ExamNotes:     "Focus on mitosis",
+		SubjectName:   "Biologie Cellulaire",
+		PrimaryCards: []PlanCardInfo{
+			{ID: 12, Title: "Mitose", Keywords: []string{"mitose", "chromosome"}},
+		},
+		CrossSubjectCards: []PlanCardInfo{
+			{ID: 205, Title: "Cycle procaryote", Keywords: []string{"cycle"}, SubjectName: "Microbiologie"},
+		},
+		UserStats: PlanUserStats{New: 42, Bad: 8, Ok: 15, Good: 67},
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{"2026-06-15", "30", "Partiel Biologie", "Focus on mitosis", "Mitose", "Cycle procaryote", "Microbiologie", "42"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}

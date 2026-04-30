@@ -164,3 +164,37 @@ type CrossSubjectRankValues struct {
 func RenderCrossSubjectRank(v CrossSubjectRankValues) (string, error) {
 	return renderTemplate("prompts/cross_subject_rank.tmpl", v)
 }
+
+// PlanCardInfo is one flashcard summary passed into the plan template.
+type PlanCardInfo struct {
+	ID          int64    // ID is the flashcard id
+	Title       string   // Title is the flashcard title (may be empty)
+	Keywords    []string // Keywords are the extracted keywords for this card
+	SubjectName string   // SubjectName is non-empty only for cross-subject cards
+}
+
+// PlanUserStats is the model-visible summary of card states for pacing.
+type PlanUserStats struct {
+	New  int // New is the count of never-reviewed cards
+	Bad  int // Bad is the count of cards last marked "bad"
+	Ok   int // Ok is the count of cards last marked "ok"
+	Good int // Good is the count of cards last marked "good"
+}
+
+// RevisionPlanValues drives the outer plan-generation template.
+type RevisionPlanValues struct {
+	ExamDate          string         // ExamDate is the exam day in YYYY-MM-DD
+	DaysRemaining     int            // DaysRemaining is the inclusive day count from today
+	ExamTitle         string         // ExamTitle is the exam's display title
+	ExamNotes         string         // ExamNotes is the optional user-provided focus
+	SubjectName       string         // SubjectName is the exam's primary subject name
+	HasAnnales        bool           // HasAnnales tells the model whether annales images are attached
+	PrimaryCards      []PlanCardInfo // PrimaryCards are flashcards in the exam subject
+	CrossSubjectCards []PlanCardInfo // CrossSubjectCards are AI-ranked cross-subject picks
+	UserStats         PlanUserStats  // UserStats are aggregate review-state counts
+}
+
+// RenderRevisionPlan renders the outer revision-plan-generation prompt.
+func RenderRevisionPlan(v RevisionPlanValues) (string, error) {
+	return renderTemplate("prompts/revision_plan.tmpl", v)
+}
