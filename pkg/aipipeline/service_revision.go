@@ -79,3 +79,44 @@ func rankSchema() []byte {
   }
 }`)
 }
+
+// PlanGenerateInput is the input to the streaming plan-generation primitive.
+type PlanGenerateInput struct {
+	UserID        int64                  // UserID is the caller (used for quota debit + audit)
+	ExamID        int64                  // ExamID is for ai_jobs metadata
+	SubjectID     int64                  // SubjectID is for ai_jobs metadata
+	Prompt        string                 // Prompt is the rendered plan-generation prompt
+	AnnalesImages []aiProvider.ImagePart // AnnalesImages are optional past-paper page images
+}
+
+// PlanGenerateOutput exposes the streaming chunks + the audit job id.
+type PlanGenerateOutput struct {
+	Chunks <-chan AIChunk // Chunks is the provider stream forwarded to SSE
+	JobID  int64          // JobID is the ai_jobs row id for client correlation
+}
+
+// GenerateRevisionPlan launches a streaming plan generation. It calls into
+// RunStructuredGeneration and returns the stream channel plus the job id.
+// Quota is debited only on success (handled by the underlying primitive's
+// post-run accounting).
+func (s *Service) GenerateRevisionPlan(ctx context.Context, in PlanGenerateInput) (*PlanGenerateOutput, error) {
+	req := AIRequest{
+		UserID:    in.UserID,
+		Feature:   FeatureGenerateRevisionPlan,
+		SubjectID: in.SubjectID,
+		Prompt:    in.Prompt,
+		Images:    in.AnnalesImages,
+		PDFPages:  len(in.AnnalesImages),
+		Metadata: map[string]any{
+			"exam_id":    in.ExamID,
+			"page_count": len(in.AnnalesImages),
+		},
+	}
+
+	ch, jobID, err := s.RunStructuredGeneration(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PlanGenerateOutput{Chunks: ch, JobID: jobID}, nil
+}
