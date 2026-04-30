@@ -52,11 +52,13 @@ func (h *AIHandler) GenerateFromPrompt(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	autoChapters := in.AutoChapters && in.ChapterID == 0
 	h.runGeneration(r.Context(), w, aipipeline.AIRequest{
-		UserID:    uid,
-		Feature:   aipipeline.FeatureGenerateFromPrompt,
-		SubjectID: in.SubjectID,
-		Prompt:    rendered,
+		UserID:       uid,
+		Feature:      aipipeline.FeatureGenerateFromPrompt,
+		SubjectID:    in.SubjectID,
+		Prompt:       rendered,
+		DropChapters: !autoChapters,
 		Metadata: map[string]any{
 			"style": in.Style, "coverage": in.Coverage, "focus": in.Focus,
 			"auto_chapters": in.AutoChapters, "chapter_id": in.ChapterID,

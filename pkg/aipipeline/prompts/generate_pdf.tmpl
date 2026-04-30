@@ -5,7 +5,7 @@ LANGUAGE: detect the natural language used in the PDF content and write EVERY us
 Audience style: {{.Style}}.
 Coverage: {{.Coverage}} ({{.Hint}}).
 {{if .Focus}}Focus specifically on: {{.Focus}}{{end}}
-{{if .AutoChapters}}You MAY propose chapter splits — include a "chapters" array of {index, title} and have each card reference a "chapterIndex". Otherwise, omit the chapters array and set chapterIndex to null.{{end}}
+{{if .AutoChapters}}You MAY propose chapter splits — include a "chapters" array of {index, title} and have each card reference a "chapterIndex" matching one of those indices.{{else}}Do NOT propose chapters. Omit the "chapters" array entirely from the output and set every "chapterIndex" to null.{{end}}
 
 Output a JSON object. Fields:
 - "chapters": optional array of {"index": int, "title": string}. Present only if auto-chapters is enabled.

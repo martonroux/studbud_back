@@ -131,18 +131,24 @@ func (s *Service) streamOnce(ctx context.Context, req AIRequest, jobID int64, ou
 	if err != nil {
 		return streamResult{err: classifyProviderStartErr(err)}
 	}
-	return s.consumeStream(ctx, chunks, out)
+	return s.consumeStream(ctx, chunks, out, req.DropChapters)
 }
 
 // consumeStream reads chunks, forwards items + chapters, counts accepted/dropped items.
 // Two parsers run in lockstep over the same byte stream: one for the "items"
 // array, one for "chapters". They are independent and order-agnostic.
-func (s *Service) consumeStream(ctx context.Context, chunks <-chan aiProvider.Chunk, out chan<- AIChunk) streamResult {
+// When dropChapters is true, chapter elements are parsed (to keep the stream
+// well-formed) but never emitted downstream.
+func (s *Service) consumeStream(ctx context.Context, chunks <-chan aiProvider.Chunk, out chan<- AIChunk, dropChapters bool) streamResult {
 	r := streamResult{}
 	items := newArrayParser("items")
 	items.onElement = elementEmitter(ctx, out, &r)
 	chapters := newArrayParser("chapters")
-	chapters.onElement = chapterEmitter(ctx, out)
+	if dropChapters {
+		chapters.onElement = func([]byte) {}
+	} else {
+		chapters.onElement = chapterEmitter(ctx, out)
+	}
 	feedChunks(ctx, []*arrayParser{items, chapters}, chunks, &r)
 	return r
 }

@@ -32,6 +32,9 @@ func TestRenderPromptGenPrompt_AutoChaptersFlipsInstruction(t *testing.T) {
 	if strings.Contains(off, "You MAY propose chapter splits") {
 		t.Error("auto_chapters=false should not mention chapter proposal")
 	}
+	if !strings.Contains(off, "Do NOT propose chapters") {
+		t.Error("auto_chapters=false missing negative chapter instruction")
+	}
 }
 
 func TestRenderPromptGenPDF_AutoChaptersFlipsInstruction(t *testing.T) {
@@ -42,6 +45,9 @@ func TestRenderPromptGenPDF_AutoChaptersFlipsInstruction(t *testing.T) {
 	}
 	if strings.Contains(off, "You MAY propose chapter splits") {
 		t.Error("auto_chapters=false should not mention chapter proposal")
+	}
+	if !strings.Contains(off, "Do NOT propose chapters") {
+		t.Error("auto_chapters=false missing negative chapter instruction")
 	}
 }
 

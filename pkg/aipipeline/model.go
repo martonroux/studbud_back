@@ -62,6 +62,7 @@ type AIRequest struct {
 	Images      []aiProvider.ImagePart // Images is populated only for FeatureGenerateFromPDF (pre-rasterized)
 	Schema      json.RawMessage // Schema is the tool-use JSON schema for the expected output
 	Metadata    map[string]any  // Metadata is persisted into ai_jobs.metadata (style, focus, coverage...)
+	DropChapters bool           // DropChapters suppresses ChunkChapter emissions when chapters are disabled
 }
 
 // QuotaLimits holds per-feature daily caps.
