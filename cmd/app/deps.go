@@ -23,6 +23,7 @@ import (
 	"studbud/backend/pkg/collaboration"
 	"studbud/backend/pkg/duel"
 	"studbud/backend/pkg/emailverification"
+	"studbud/backend/pkg/exam"
 	"studbud/backend/pkg/flashcard"
 	"studbud/backend/pkg/friendship"
 	"studbud/backend/pkg/gamification"
@@ -56,6 +57,7 @@ type deps struct {
 	collab       *collaboration.Service     // collab manages collaborative editing sessions
 	preferences  *preferences.Service       // preferences stores per-user settings
 	gamification *gamification.Service      // gamification tracks badges and XP
+	exam         *exam.Service              // exam owns exam CRUD
 	ai           *aipipeline.Service        // ai provides AI pipeline stubs
 	quiz         *quiz.Service              // quiz provides quiz generation stubs
 	plan         *pkgplan.Service           // plan provides study plan stubs
@@ -90,7 +92,7 @@ func buildDeps(ctx context.Context, cfg *config.Config) (*deps, func(), error) {
 	}
 
 	dom := buildDomainServices(cfg, pool, inf)
-	stubs := buildStubServices(cfg, pool, inf, dom.access)
+	stubs := buildStubServices(cfg, pool, inf, dom)
 
 	worker, enq := wireKeywordWorker(pool, cfg, stubs.ai)
 	inf.worker = worker
@@ -180,6 +182,7 @@ type domainSvcs struct {
 	collab       *collaboration.Service     // collab manages collaborative editing sessions
 	preferences  *preferences.Service       // preferences stores per-user settings
 	gamification *gamification.Service      // gamification tracks badges and XP
+	exam         *exam.Service              // exam owns exam CRUD
 }
 
 // buildDomainServices constructs all real domain services.
@@ -199,6 +202,7 @@ func buildDomainServices(cfg *config.Config, pool *pgxpool.Pool, inf infra) doma
 		collab:       collaboration.NewService(pool, acc),
 		preferences:  preferences.NewService(pool),
 		gamification: gamification.NewService(pool),
+		exam:         exam.NewService(pool, acc),
 	}
 }
 
@@ -212,11 +216,13 @@ type stubSvcs struct {
 }
 
 // buildStubServices constructs stub/AI-backed services.
-func buildStubServices(cfg *config.Config, pool *pgxpool.Pool, inf infra, acc *access.Service) stubSvcs {
+// The plan service requires the exam service, so domain services are constructed first.
+func buildStubServices(cfg *config.Config, pool *pgxpool.Pool, inf infra, dom domainSvcs) stubSvcs {
+	ai := aipipeline.NewService(pool, inf.aiClient, dom.access, aipipeline.DefaultQuotaLimits(), cfg.AIModel)
 	return stubSvcs{
-		ai:      aipipeline.NewService(pool, inf.aiClient, acc, aipipeline.DefaultQuotaLimits(), cfg.AIModel),
+		ai:      ai,
 		quiz:    quiz.NewService(pool),
-		plan:    pkgplan.NewService(pool),
+		plan:    pkgplan.NewService(pool, ai, dom.exam, dom.image, dom.access, cfg.AIModel),
 		duel:    duel.NewService(pool, inf.hub),
 		billing: pkgbilling.NewService(pool, inf.billing),
 	}
@@ -243,6 +249,7 @@ func assembleDeps(cfg *config.Config, pool *pgxpool.Pool, inf infra, dom domainS
 		collab:       dom.collab,
 		preferences:  dom.preferences,
 		gamification: dom.gamification,
+		exam:         dom.exam,
 		ai:           stubs.ai,
 		quiz:         stubs.quiz,
 		plan:         stubs.plan,
@@ -275,7 +282,7 @@ func mustBuildDepsWithFake(t TestingT, pool *pgxpool.Pool, cfg *config.Config, f
 	}
 	inf.aiClient = fake
 	dom := buildDomainServices(cfg, pool, inf)
-	stubs := buildStubServices(cfg, pool, inf, dom.access)
+	stubs := buildStubServices(cfg, pool, inf, dom)
 	worker, enq := wireKeywordWorker(pool, cfg, stubs.ai)
 	inf.worker = worker
 	dom.flashcard = flashcard.NewService(pool, dom.access, enq)

@@ -27,6 +27,8 @@ tags:
   - name: Gamification
   - name: AI
   - name: Admin
+  - name: Exams
+  - name: RevisionPlan
 
 security:
   - BearerAuth: []
@@ -169,8 +171,20 @@ paths:
   /upload-image:
     post:
       tags: [Images]
-      summary: Upload image (verified)
-      description: Multipart upload. 5 MiB form cap, 6 MiB hard cap.
+      summary: Upload image or annales PDF (verified)
+      description: |
+        Multipart upload. Default profile: image MIMEs only, 5 MiB form cap, 6 MiB hard cap.
+        Pass `purpose=exam_annales` (query string or form field) to upload a past-paper PDF
+        for an exam: PDF only, 5 MiB max, 10 pages max.
+      parameters:
+        - in: query
+          name: purpose
+          required: false
+          description: |
+            Upload context. Omit for default image upload. Use `exam_annales` for an exam annales PDF.
+          schema:
+            type: string
+            enum: ["", exam_annales]
       requestBody:
         required: true
         content:
@@ -180,6 +194,10 @@ paths:
               required: [file]
               properties:
                 file: { type: string, format: binary }
+                purpose:
+                  type: string
+                  description: Same as the query-string `purpose`; either form may be used.
+                  enum: ["", exam_annales]
       responses:
         '200':
           description: Image id + URL
@@ -1090,6 +1108,158 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /exams:
+    post:
+      tags: [Exams]
+      summary: Create an exam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExamInput' }
+      responses:
+        '201':
+          description: The created exam
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Exam' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Active-exam cap reached
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    get:
+      tags: [Exams]
+      summary: List exams
+      responses:
+        '200':
+          description: Exams ordered by exam date ascending
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Exam' }
+
+  /exams/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Exams]
+      summary: Read one exam
+      responses:
+        '200':
+          description: The exam
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Exam' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Exams]
+      summary: Update exam
+      description: |
+        SubjectID is immutable post-create. Pass the existing value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExamInput' }
+      responses:
+        '200':
+          description: The updated exam
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Exam' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Exams]
+      summary: Delete exam (cascades plan + progress)
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /exams/{id}/generate-plan:
+    post:
+      tags: [RevisionPlan]
+      summary: Generate (or regenerate) the revision plan for an exam
+      description: |
+        SSE endpoint. Streams phase events: `shortlist`, `ranking`, `planning`, `done`, `error`.
+        Each event's data payload mirrors the orchestrator's Event shape (`{phase, detail?, plan?, error?}`).
+        Costs 1 `plan` quota unit; debits annales PDF pages against `pdf.pagesUsed` when an annales is attached.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: text/event-stream of phase events
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Missing AI subscription or wrong owner
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          description: Plan quota exhausted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /exams/{id}/plan:
+    get:
+      tags: [RevisionPlan]
+      summary: Read the persisted plan + today's bucket + drift
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Plan view
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanView' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /exams/{id}/mark-done:
+    post:
+      tags: [RevisionPlan]
+      summary: Mark a flashcard as completed in today's plan
+      description: Idempotent — duplicate calls for the same (user, fc, day) are silently ignored.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flashcardId]
+              properties:
+                flashcardId: { type: integer, format: int64 }
+      responses:
+        '204': { description: Recorded }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1473,3 +1643,69 @@ components:
         cardIds:
           type: array
           items: { type: integer, format: int64 }
+
+    Exam:
+      type: object
+      properties:
+        id:             { type: integer, format: int64 }
+        userId:         { type: integer, format: int64 }
+        subjectId:      { type: integer, format: int64 }
+        title:          { type: string }
+        notes:          { type: string }
+        examDate:       { type: string, format: date }
+        annalesImageId: { type: string, nullable: true }
+        createdAt:      { type: string, format: date-time }
+        updatedAt:      { type: string, format: date-time }
+
+    ExamInput:
+      type: object
+      required: [subjectId, title, examDate]
+      properties:
+        subjectId:      { type: integer, format: int64, description: Immutable after creation }
+        title:          { type: string }
+        notes:          { type: string }
+        examDate:       { type: string, description: "YYYY-MM-DD" }
+        annalesImageId: { type: string, nullable: true, description: "Image id from POST /upload-image?purpose=exam_annales" }
+
+    PlanDay:
+      type: object
+      properties:
+        date:                { type: string, format: date }
+        primarySubjectCards: { type: array, items: { type: integer, format: int64 } }
+        crossSubjectCards:   { type: array, items: { type: integer, format: int64 } }
+        deeperDives:         { type: array, items: { type: integer, format: int64 } }
+
+    Plan:
+      type: object
+      properties:
+        id:           { type: integer, format: int64 }
+        examId:       { type: integer, format: int64 }
+        days:
+          type: array
+          items: { $ref: '#/components/schemas/PlanDay' }
+        model:        { type: string }
+        promptHash:   { type: string }
+        generatedAt:  { type: string, format: date-time }
+
+    TodayBucket:
+      type: object
+      properties:
+        date:                { type: string, format: date }
+        primarySubjectCards: { type: array, items: { type: integer, format: int64 } }
+        crossSubjectCards:   { type: array, items: { type: integer, format: int64 } }
+        deeperDives:         { type: array, items: { type: integer, format: int64 } }
+        done:                { type: array, items: { type: integer, format: int64 } }
+        dailyGoalMet:        { type: boolean }
+
+    Drift:
+      type: object
+      properties:
+        daysBehind:         { type: integer }
+        shouldSuggestRegen: { type: boolean }
+
+    PlanView:
+      type: object
+      properties:
+        plan:  { $ref: '#/components/schemas/Plan' }
+        today: { $ref: '#/components/schemas/TodayBucket' }
+        drift: { $ref: '#/components/schemas/Drift' }

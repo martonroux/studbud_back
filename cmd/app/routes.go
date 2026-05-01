@@ -122,6 +122,8 @@ func registerVerifiedRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFun
 	fcH := handler.NewFlashcardHandler(d.flashcard)
 	friendH := handler.NewFriendshipHandler(d.friendship)
 	collabH := handler.NewCollaborationHandler(d.collab)
+	examH := handler.NewExamHandler(d.exam)
+	planH := handler.NewRevisionPlanHandler(d.plan)
 
 	mux.Handle("POST /set-profile-picture", av(userH.SetProfilePicture))
 	mux.Handle("GET /get-user-stats", av(userH.Stats))
@@ -141,13 +143,21 @@ func registerVerifiedRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFun
 	mux.Handle("POST /collaborator-remove", av(collabH.RemoveCollaborator))
 	mux.Handle("POST /collaboration-invites", av(collabH.CreateInvite))
 	mux.Handle("POST /collaboration-invite-redeem", av(collabH.RedeemInvite))
+	mux.Handle("POST /exams", av(examH.Create))
+	mux.Handle("GET /exams", av(examH.List))
+	mux.Handle("GET /exams/{id}", av(examH.Get))
+	mux.Handle("PUT /exams/{id}", av(examH.Update))
+	mux.Handle("DELETE /exams/{id}", av(examH.Delete))
+	mux.Handle("POST /exams/{id}/generate-plan", av(planH.Generate))
+	mux.Handle("GET /exams/{id}/plan", av(planH.Get))
+	mux.Handle("POST /exams/{id}/mark-done", av(planH.MarkDone))
 }
 
-// registerStubRoutes attaches AI, quiz, plan, and duel stub routes (auth + verified).
+// registerStubRoutes attaches AI, quiz, and duel stub routes (auth + verified).
+// Plan endpoints have moved to registerVerifiedRoutes; Spec B replaced the stubs.
 func registerStubRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFunc) http.Handler) {
 	aiH := handler.NewAIHandler(d.ai)
 	quizH := handler.NewQuizHandler(d.quiz)
-	planH := handler.NewPlanHandler(d.plan)
 	duelH := handler.NewDuelHandler(d.duel)
 
 	mux.Handle("POST /ai/flashcards/prompt", av(aiH.GenerateFromPrompt))
@@ -157,8 +167,6 @@ func registerStubRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFunc) h
 	mux.Handle("POST /quiz/generate", av(quizH.Generate))
 	mux.Handle("POST /quiz/attempt", av(quizH.Attempt))
 	mux.Handle("POST /quiz/share", av(quizH.Share))
-	mux.Handle("POST /plan/generate", av(planH.Generate))
-	mux.Handle("GET /plan/progress", av(planH.Progress))
 	mux.Handle("POST /duel/invite", av(duelH.Invite))
 	mux.Handle("POST /duel/accept", av(duelH.Accept))
 	mux.Handle("GET /duel/connect", av(duelH.Connect))

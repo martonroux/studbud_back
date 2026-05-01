@@ -3,10 +3,13 @@ package image
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"studbud/backend/internal/myErrors"
 	"studbud/backend/internal/storage"
 	"studbud/backend/testutil"
 )
@@ -22,19 +25,10 @@ var pngBytes = []byte{
 }
 
 func TestUploadOpenDelete(t *testing.T) {
-	pool := testutil.OpenTestDB(t)
-	testutil.Reset(t, pool)
-	u := testutil.NewVerifiedUser(t, pool)
+	svc, u, cleanup := newTestService(t)
+	defer cleanup()
 
-	dir, err := os.MkdirTemp("", "imgtest-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-	store, _ := storage.NewFileStore(dir)
-	svc := NewService(pool, store, "http://localhost:8080")
-
-	img, err := svc.Upload(context.Background(), u.ID, bytes.NewReader(pngBytes), "pic.png")
+	img, err := svc.Upload(context.Background(), u.ID, bytes.NewReader(pngBytes), "pic.png", PurposeImage)
 	if err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
@@ -58,4 +52,89 @@ func TestUploadOpenDelete(t *testing.T) {
 	if _, _, err := svc.Open(context.Background(), img.ID); err == nil {
 		t.Fatal("expected error after Delete")
 	}
+}
+
+func TestUpload_ExamAnnales_AcceptsPDF(t *testing.T) {
+	svc, u, cleanup := newTestService(t)
+	defer cleanup()
+
+	pdf := loadAnnalesPDF(t)
+	img, err := svc.Upload(context.Background(), u.ID, bytes.NewReader(pdf), "annales.pdf", PurposeExamAnnales)
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if img.MimeType != "application/pdf" {
+		t.Fatalf("mime = %q, want application/pdf", img.MimeType)
+	}
+	if !bytes.HasSuffix([]byte(img.Filename), []byte(".pdf")) {
+		t.Fatalf("filename %q does not have .pdf extension", img.Filename)
+	}
+}
+
+func TestUpload_ExamAnnales_RejectsImage(t *testing.T) {
+	svc, u, cleanup := newTestService(t)
+	defer cleanup()
+
+	_, err := svc.Upload(context.Background(), u.ID, bytes.NewReader(pngBytes), "pic.png", PurposeExamAnnales)
+	if err == nil {
+		t.Fatal("expected error: PNG should be rejected for exam_annales")
+	}
+	if !errors.Is(err, myErrors.ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+}
+
+func TestUpload_DefaultPurpose_RejectsPDF(t *testing.T) {
+	svc, u, cleanup := newTestService(t)
+	defer cleanup()
+
+	pdf := loadAnnalesPDF(t)
+	_, err := svc.Upload(context.Background(), u.ID, bytes.NewReader(pdf), "annales.pdf", PurposeImage)
+	if err == nil {
+		t.Fatal("expected error: PDF should be rejected for default image purpose")
+	}
+	if !errors.Is(err, myErrors.ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+}
+
+func TestUpload_UnknownPurpose_Rejected(t *testing.T) {
+	svc, u, cleanup := newTestService(t)
+	defer cleanup()
+
+	_, err := svc.Upload(context.Background(), u.ID, bytes.NewReader(pngBytes), "pic.png", Purpose("nonsense"))
+	if err == nil {
+		t.Fatal("expected error on unknown purpose")
+	}
+	if !errors.Is(err, myErrors.ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+}
+
+// newTestService builds a Service backed by a tmp filesystem and the shared test DB.
+func newTestService(t *testing.T) (*Service, *testutil.UserFixture, func()) {
+	t.Helper()
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	dir, err := os.MkdirTemp("", "imgtest-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, _ := storage.NewFileStore(dir)
+	svc := NewService(pool, store, "http://localhost:8080")
+	cleanup := func() { os.RemoveAll(dir) }
+	return svc, u, cleanup
+}
+
+// loadAnnalesPDF reads a small (≤10-page) PDF from the aiProvider testdata directory.
+// Skips the test if the fixture isn't available (e.g. cgo-disabled builds).
+func loadAnnalesPDF(t *testing.T) []byte {
+	t.Helper()
+	path := filepath.Join("..", "..", "internal", "aiProvider", "testdata", "sample.pdf")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("no test PDF at %s: %v", path, err)
+	}
+	return b
 }
