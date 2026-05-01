@@ -21,13 +21,18 @@ func NewImageHandler(svc *image.Service) *ImageHandler {
 }
 
 // Upload handles POST /upload-image (multipart).
-// Hard-caps the request body at 6 MiB to prevent unbounded disk usage from form spillover.
+// Optional `purpose` form field switches the validation profile (e.g. "exam_annales" allows PDFs).
+// Body cap is 6 MiB by default; exam_annales widens it to 7 MiB to leave headroom over the 5 MB PDF cap.
 func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	uid := authctx.UID(r.Context())
-	r.Body = http.MaxBytesReader(w, r.Body, 6<<20)
-	if err := r.ParseMultipartForm(5 << 20); err != nil {
+	purpose := image.Purpose(r.URL.Query().Get("purpose"))
+	r.Body = http.MaxBytesReader(w, r.Body, uploadBodyCap(purpose))
+	if err := r.ParseMultipartForm(parseFormCap(purpose)); err != nil {
 		httpx.WriteError(w, myErrors.ErrInvalidInput)
 		return
+	}
+	if purpose == "" {
+		purpose = image.Purpose(r.FormValue("purpose"))
 	}
 	file, hdr, err := r.FormFile("file")
 	if err != nil {
@@ -35,12 +40,29 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	img, err := h.svc.Upload(r.Context(), uid, file, hdr.Filename)
+	img, err := h.svc.Upload(r.Context(), uid, file, hdr.Filename, purpose)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"id": img.ID, "url": h.svc.URL(img.ID)})
+}
+
+// uploadBodyCap returns the hard request-body cap for the given purpose.
+// Annales accept PDFs up to 5 MiB, so the body cap is widened to 7 MiB to allow form-encoding overhead.
+func uploadBodyCap(p image.Purpose) int64 {
+	if p == image.PurposeExamAnnales {
+		return 7 << 20
+	}
+	return 6 << 20
+}
+
+// parseFormCap returns the in-memory limit for ParseMultipartForm based on purpose.
+func parseFormCap(p image.Purpose) int64 {
+	if p == image.PurposeExamAnnales {
+		return 6 << 20
+	}
+	return 5 << 20
 }
 
 // Serve handles GET /images/{id}.
