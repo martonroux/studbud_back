@@ -19,6 +19,10 @@ const (
 	FeatureCheckFlashcard FeatureKey = "check_flashcard"
 	// FeatureExtractKeywords is the background keyword-extraction worker (Spec B.0).
 	FeatureExtractKeywords FeatureKey = "extract_keywords"
+	// FeatureGenerateRevisionPlan is the AI revision plan generator (Spec B).
+	FeatureGenerateRevisionPlan FeatureKey = "revision_plan"
+	// FeatureCrossSubjectRank is the cross-subject ranking helper (Spec B).
+	FeatureCrossSubjectRank FeatureKey = "cross_subject_rank"
 )
 
 // ChunkKind tags a streamed AIChunk.
@@ -73,6 +77,7 @@ type QuotaLimits struct {
 	PDFCalls    int // PDFCalls is the daily cap on successful PDF generations
 	PDFPages    int // PDFPages is the daily cap on total PDF pages consumed
 	CheckCalls  int // CheckCalls is the daily cap on successful check calls
+	PlanCalls   int // PlanCalls caps daily revision-plan generations (default 5)
 }
 
 // DefaultQuotaLimits returns the v1 starting caps. Tune post-launch.
@@ -82,6 +87,7 @@ func DefaultQuotaLimits() QuotaLimits {
 		PDFCalls:    5,
 		PDFPages:    100,
 		CheckCalls:  50,
+		PlanCalls:   5,
 	}
 }
 

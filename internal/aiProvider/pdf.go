@@ -123,3 +123,20 @@ func combineResults(imgs []ImagePart, errs []error) ([]ImagePart, error) {
 	}
 	return imgs, nil
 }
+
+// PDFPageCount returns the number of pages in pdfBytes without rasterizing.
+// Useful for upload-time validation (page caps, quota estimation).
+func PDFPageCount(pdfBytes []byte) (int, error) {
+	if len(pdfBytes) == 0 {
+		return 0, fmt.Errorf("empty pdf bytes")
+	}
+
+	doc, err := fitz.NewFromMemory(pdfBytes)
+	if err != nil {
+		return 0, fmt.Errorf("open pdf:\n%w", err)
+	}
+
+	defer doc.Close()
+
+	return doc.NumPage(), nil
+}

@@ -24,6 +24,15 @@ CREATE TABLE IF NOT EXISTS quizzes (
 );
 CREATE INDEX IF NOT EXISTS idx_quizzes_owner ON quizzes(owner_id);
 
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quizzes_plan_id_fkey') THEN
+    ALTER TABLE quizzes
+      ADD CONSTRAINT quizzes_plan_id_fkey
+      FOREIGN KEY (plan_id) REFERENCES revision_plans(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS quiz_questions (
     id                  BIGSERIAL PRIMARY KEY,
     quiz_id             BIGINT NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,

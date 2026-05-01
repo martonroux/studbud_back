@@ -10,10 +10,12 @@ import (
 
 // quotaRow is the per-user per-day counter tuple we read before a call.
 type quotaRow struct {
-	PromptCalls int // PromptCalls is today's prompt generation count
-	PDFCalls    int // PDFCalls is today's PDF generation count
-	PDFPages    int // PDFPages is today's PDF page consumption
-	CheckCalls  int // CheckCalls is today's check-flashcard count
+	PromptCalls           int // PromptCalls is today's prompt generation count
+	PDFCalls              int // PDFCalls is today's PDF generation count
+	PDFPages              int // PDFPages is today's PDF page consumption
+	CheckCalls            int // CheckCalls is today's check-flashcard count
+	PlanCalls             int // PlanCalls is today's revision-plan generation count
+	CrossSubjectRankCalls int // CrossSubjectRankCalls is today's cross-subject rank count
 }
 
 // QuotaBucket is one feature's used/limit/reset tuple as surfaced to clients.
@@ -57,33 +59,54 @@ func (s *Service) readOrCreateQuotaRow(ctx context.Context, uid int64) (quotaRow
 		return quotaRow{}, fmt.Errorf("ensure quota row:\n%w", err)
 	}
 	var row quotaRow
-	err := s.db.QueryRow(ctx, sqlSelectQuotaRow, uid).Scan(&row.PromptCalls, &row.PDFCalls, &row.PDFPages, &row.CheckCalls)
+	err := s.db.QueryRow(ctx, sqlSelectQuotaRow, uid).Scan(&row.PromptCalls, &row.PDFCalls, &row.PDFPages, &row.CheckCalls, &row.PlanCalls, &row.CrossSubjectRankCalls)
 	if err != nil {
 		return quotaRow{}, fmt.Errorf("select quota row:\n%w", err)
 	}
 	return row, nil
 }
 
-// checkAgainstLimits returns an ErrQuotaExhausted if the feature is over cap.
-func checkAgainstLimits(row quotaRow, feat FeatureKey, pdfPages int, lim QuotaLimits) error {
+// checkAgainstLimitsPure is the routing logic for quota checks, factored as a
+// pure function to support unit testing without a database.
+// The used map keys match the ai_quota_daily column names.
+func checkAgainstLimitsPure(feat FeatureKey, used map[string]int, limits QuotaLimits, pdfPages int) error {
 	switch feat {
 	case FeatureGenerateFromPrompt:
-		if row.PromptCalls >= lim.PromptCalls {
+		if used["prompt_calls"] >= limits.PromptCalls {
 			return quotaExhausted("prompt")
 		}
 	case FeatureGenerateFromPDF:
-		if row.PDFCalls >= lim.PDFCalls {
+		if used["pdf_calls"] >= limits.PDFCalls {
 			return quotaExhausted("pdf")
 		}
-		if row.PDFPages+pdfPages > lim.PDFPages {
+		if used["pdf_pages"]+pdfPages > limits.PDFPages {
 			return quotaExhausted("pdf_pages")
 		}
 	case FeatureCheckFlashcard:
-		if row.CheckCalls >= lim.CheckCalls {
+		if used["check_calls"] >= limits.CheckCalls {
 			return quotaExhausted("check")
 		}
+	case FeatureGenerateRevisionPlan:
+		if used["plan_calls"] >= limits.PlanCalls {
+			return quotaExhausted("plan")
+		}
+	case FeatureCrossSubjectRank:
+		return nil // sub-step of plan generation; no quota check
 	}
 	return nil
+}
+
+// checkAgainstLimits returns an ErrQuotaExhausted if the feature is over cap.
+func checkAgainstLimits(row quotaRow, feat FeatureKey, pdfPages int, lim QuotaLimits) error {
+	used := map[string]int{
+		"prompt_calls":             row.PromptCalls,
+		"pdf_calls":                row.PDFCalls,
+		"pdf_pages":                row.PDFPages,
+		"check_calls":              row.CheckCalls,
+		"plan_calls":               row.PlanCalls,
+		"cross_subject_rank_calls": row.CrossSubjectRankCalls,
+	}
+	return checkAgainstLimitsPure(feat, used, lim, pdfPages)
 }
 
 // quotaExhausted builds an AppError wrapping ErrQuotaExhausted with feature-specific message.
@@ -137,6 +160,10 @@ func debitCallsSQL(feat FeatureKey) (string, error) {
 		return sqlDebitPDFCalls, nil
 	case FeatureCheckFlashcard:
 		return sqlDebitCheckCalls, nil
+	case FeatureGenerateRevisionPlan:
+		return sqlDebitPlanCalls, nil
+	case FeatureCrossSubjectRank:
+		return sqlDebitCrossSubjectRankCalls, nil
 	}
 	return "", fmt.Errorf("unknown feature %q", feat)
 }
@@ -173,4 +200,11 @@ func buildSnapshot(row quotaRow, lim QuotaLimits, aiAccess bool) *QuotaSnapshot 
 func nextMidnightUTC(t time.Time) time.Time {
 	u := t.UTC()
 	return time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, time.UTC)
+}
+
+// CheckAgainstLimitsForTest is a pure-function shim over the limit-routing
+// branch of checkAgainstLimits so unit tests can exercise it without a DB.
+// The real path goes through Service.CheckQuota.
+func CheckAgainstLimitsForTest(feat FeatureKey, used map[string]int, limits QuotaLimits, pdfPages int) error {
+	return checkAgainstLimitsPure(feat, used, limits, pdfPages)
 }

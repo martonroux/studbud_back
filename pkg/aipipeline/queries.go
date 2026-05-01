@@ -10,7 +10,7 @@ ON CONFLICT (user_id, day) DO NOTHING
 `
 
 const sqlSelectQuotaRow = `
-SELECT prompt_calls, pdf_calls, pdf_pages, check_calls
+SELECT prompt_calls, pdf_calls, pdf_pages, check_calls, plan_calls, cross_subject_rank_calls
 FROM ai_quota_daily
 WHERE user_id = $1 AND day = current_date
 `
@@ -32,6 +32,16 @@ WHERE user_id = $1 AND day = current_date
 
 const sqlDebitCheckCalls = `
 UPDATE ai_quota_daily SET check_calls = check_calls + $2
+WHERE user_id = $1 AND day = current_date
+`
+
+const sqlDebitPlanCalls = `
+UPDATE ai_quota_daily SET plan_calls = plan_calls + $2
+WHERE user_id = $1 AND day = current_date
+`
+
+const sqlDebitCrossSubjectRankCalls = `
+UPDATE ai_quota_daily SET cross_subject_rank_calls = cross_subject_rank_calls + $2
 WHERE user_id = $1 AND day = current_date
 `
 

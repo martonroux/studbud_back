@@ -1,0 +1,20 @@
+You are helping a student revise for an upcoming exam.
+
+EXAM SUBJECT: {{.ExamSubject}}
+EXAM TITLE: {{.ExamTitle}}
+
+You will receive a shortlist of flashcards from OTHER subjects in the student's
+study set. They share keywords with the exam subject. Your job: pick the {{.TopK}}
+most directly relevant cards for revising for this exam.
+
+Rules:
+- Pick by topical relevance, not by overlap score alone.
+- Reject cards whose connection is incidental (a shared word but unrelated topic).
+- Return the selected card IDs in priority order (most relevant first).
+
+CANDIDATES:
+{{- range .Candidates}}
+- ID: {{.ID}} | "{{.Title}}" ({{.SubjectName}}) | keywords: {{join .Keywords ", "}} | overlap: {{.OverlapScore}}
+{{- end}}
+
+Respond with the JSON tool-use payload only.

@@ -7,35 +7,44 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// TEMPORARY: destructive realignment for Spec B pre-launch (Plan B Task 1 —
+// see docs/superpowers/plans/2026-04-30-ai-revision-plan.md). Replace with
+// CREATE TABLE IF NOT EXISTS once all consumers reference the new column shape.
 const planSchema = `
-CREATE TABLE IF NOT EXISTS exams (
-    id                BIGSERIAL PRIMARY KEY,
-    user_id           BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    subject_id        BIGINT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
-    title             TEXT NOT NULL,
-    exam_date         DATE NOT NULL,
-    annales_image_id  TEXT NULL REFERENCES images(id) ON DELETE SET NULL,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_exams_user_date ON exams(user_id, exam_date);
+DROP TABLE IF EXISTS revision_plan_progress CASCADE;
+DROP TABLE IF EXISTS revision_plans CASCADE;
+DROP TABLE IF EXISTS exams CASCADE;
 
-CREATE TABLE IF NOT EXISTS revision_plans (
-    id             BIGSERIAL PRIMARY KEY,
-    exam_id        BIGINT NOT NULL UNIQUE REFERENCES exams(id) ON DELETE CASCADE,
-    intensity      TEXT NOT NULL DEFAULT 'balanced',
-    payload        JSONB NOT NULL,
-    generated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT revision_plans_intensity_chk CHECK (intensity IN ('light','balanced','intense'))
+CREATE TABLE exams (
+    id                BIGSERIAL    PRIMARY KEY,
+    user_id           BIGINT       NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    subject_id        BIGINT       NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    date              DATE         NOT NULL,
+    title             TEXT         NOT NULL,
+    notes             TEXT,
+    annales_image_id  TEXT         REFERENCES images(id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_exams_user_active ON exams (user_id, date);
+
+CREATE TABLE revision_plans (
+    id            BIGSERIAL    PRIMARY KEY,
+    exam_id       BIGINT       NOT NULL UNIQUE REFERENCES exams(id) ON DELETE CASCADE,
+    generated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    days          JSONB        NOT NULL,
+    model         TEXT         NOT NULL,
+    prompt_hash   TEXT         NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS revision_plan_progress (
-    plan_id     BIGINT NOT NULL REFERENCES revision_plans(id) ON DELETE CASCADE,
-    day         DATE NOT NULL,
-    item_key    TEXT NOT NULL,
-    done_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (plan_id, day, item_key)
+CREATE TABLE revision_plan_progress (
+    user_id   BIGINT      NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
+    fc_id     BIGINT      NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+    plan_date DATE        NOT NULL,
+    done_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, fc_id, plan_date)
 );
+CREATE INDEX idx_rpp_user_today ON revision_plan_progress (user_id, plan_date);
 `
 
 func setupPlan(ctx context.Context, pool *pgxpool.Pool) error {
