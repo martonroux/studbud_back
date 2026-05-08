@@ -101,7 +101,7 @@ CREATE TABLE revision_plans (
     days          JSONB       NOT NULL,
     model         TEXT        NOT NULL,  -- e.g. "claude-sonnet-4-6"
     prompt_hash   TEXT        NOT NULL,  -- for debugging plan drift across prompt edits
-    generation_id BIGINT                 -- FK to ai_audit_log if retained
+    generation_id BIGINT      REFERENCES ai_jobs(id) ON DELETE SET NULL  -- nullable for legacy rows; identifies the originating ai_jobs row
 );
 ```
 
