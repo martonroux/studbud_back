@@ -13,8 +13,9 @@ import (
 
 // persist replaces any existing plan for examID with a freshly generated one.
 // Runs DELETE + INSERT in a single transaction so a failed insert leaves
-// the previous plan intact.
-func (s *Service) persist(ctx context.Context, examID int64, days []Day, model, promptHash string) (*Plan, error) {
+// the previous plan intact. generationID, when non-nil, links the plan to
+// the originating ai_jobs row.
+func (s *Service) persist(ctx context.Context, examID int64, days []Day, model, promptHash string, generationID *int64) (*Plan, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("begin tx:\n%w", err)
@@ -28,12 +29,12 @@ func (s *Service) persist(ctx context.Context, examID int64, days []Day, model, 
 	if err != nil {
 		return nil, fmt.Errorf("marshal days:\n%w", err)
 	}
-	plan := Plan{ExamID: examID, Days: days, Model: model, PromptHash: promptHash}
+	plan := Plan{ExamID: examID, Days: days, Model: model, PromptHash: promptHash, GenerationID: generationID}
 	row := tx.QueryRow(ctx, `
-        INSERT INTO revision_plans (exam_id, days, model, prompt_hash)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO revision_plans (exam_id, days, model, prompt_hash, generation_id)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id, generated_at
-    `, examID, daysJSON, model, promptHash)
+    `, examID, daysJSON, model, promptHash, generationID)
 	if err := row.Scan(&plan.ID, &plan.GeneratedAt); err != nil {
 		return nil, fmt.Errorf("insert plan:\n%w", err)
 	}
@@ -48,9 +49,9 @@ func (s *Service) loadPlanByExam(ctx context.Context, examID int64) (*Plan, erro
 	var p Plan
 	var daysRaw []byte
 	err := s.db.QueryRow(ctx, `
-        SELECT id, exam_id, days, model, prompt_hash, generated_at
+        SELECT id, exam_id, days, model, prompt_hash, generated_at, generation_id
         FROM revision_plans WHERE exam_id = $1
-    `, examID).Scan(&p.ID, &p.ExamID, &daysRaw, &p.Model, &p.PromptHash, &p.GeneratedAt)
+    `, examID).Scan(&p.ID, &p.ExamID, &daysRaw, &p.Model, &p.PromptHash, &p.GeneratedAt, &p.GenerationID)
 	if err != nil {
 		return nil, err
 	}

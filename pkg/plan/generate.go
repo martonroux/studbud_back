@@ -125,18 +125,19 @@ func (s *Service) runPlanningPhase(
 	if err != nil {
 		return nil, err
 	}
-	days, err := s.streamPlanGeneration(ctx, userID, exm, prompt, images)
+	days, jobID, err := s.streamPlanGeneration(ctx, userID, exm, prompt, images)
 	if err != nil {
 		return nil, err
 	}
 	cleaned := normalizePlan(days, primary, candidates, time.Now(), exm.ExamDate)
-	return s.persist(ctx, exm.ID, cleaned, s.model, hashPrompt(prompt))
+	return s.persist(ctx, exm.ID, cleaned, s.model, hashPrompt(prompt), &jobID)
 }
 
 // streamPlanGeneration calls aipipeline.GenerateRevisionPlan, drains its chunk
-// stream, and reassembles the AI's per-day items into a []Day.
+// stream, and reassembles the AI's per-day items into a []Day. The returned
+// jobID identifies the ai_jobs row for audit-correlation.
 // Quota debit + ai_jobs accounting are owned by RunStructuredGeneration.
-func (s *Service) streamPlanGeneration(ctx context.Context, userID int64, exm *exam.Exam, prompt string, images []aiProvider.ImagePart) ([]Day, error) {
+func (s *Service) streamPlanGeneration(ctx context.Context, userID int64, exm *exam.Exam, prompt string, images []aiProvider.ImagePart) ([]Day, int64, error) {
 	out, err := s.ai.GenerateRevisionPlan(ctx, aipipeline.PlanGenerateInput{
 		UserID:        userID,
 		ExamID:        exm.ID,
@@ -145,9 +146,13 @@ func (s *Service) streamPlanGeneration(ctx context.Context, userID int64, exm *e
 		AnnalesImages: images,
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return collectDayItems(ctx, out.Chunks)
+	days, err := collectDayItems(ctx, out.Chunks)
+	if err != nil {
+		return nil, out.JobID, err
+	}
+	return days, out.JobID, nil
 }
 
 // collectDayItems consumes the streamed AIChunk channel and decodes each item
