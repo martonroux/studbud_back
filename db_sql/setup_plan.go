@@ -7,15 +7,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TEMPORARY: destructive realignment for Spec B pre-launch (Plan B Task 1 —
-// see docs/superpowers/plans/2026-04-30-ai-revision-plan.md). Replace with
-// CREATE TABLE IF NOT EXISTS once all consumers reference the new column shape.
+// planSchema is idempotent: safe to run on every boot and on every test setup.
+// Schema shape follows Spec B §4 (exams, revision_plans, revision_plan_progress).
 const planSchema = `
-DROP TABLE IF EXISTS revision_plan_progress CASCADE;
-DROP TABLE IF EXISTS revision_plans CASCADE;
-DROP TABLE IF EXISTS exams CASCADE;
-
-CREATE TABLE exams (
+CREATE TABLE IF NOT EXISTS exams (
     id                BIGSERIAL    PRIMARY KEY,
     user_id           BIGINT       NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     subject_id        BIGINT       NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
@@ -26,9 +21,12 @@ CREATE TABLE exams (
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_exams_user_active ON exams (user_id, date);
+-- Plain (non-partial) index: Spec B §4.1 calls for WHERE date >= CURRENT_DATE,
+-- but Postgres rejects CURRENT_DATE in index predicates (STABLE, not IMMUTABLE).
+-- The application query filters by date instead.
+CREATE INDEX IF NOT EXISTS idx_exams_user_active ON exams (user_id, date);
 
-CREATE TABLE revision_plans (
+CREATE TABLE IF NOT EXISTS revision_plans (
     id            BIGSERIAL    PRIMARY KEY,
     exam_id       BIGINT       NOT NULL UNIQUE REFERENCES exams(id) ON DELETE CASCADE,
     generated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -36,17 +34,20 @@ CREATE TABLE revision_plans (
     model         TEXT         NOT NULL,
     prompt_hash   TEXT         NOT NULL
 );
+ALTER TABLE revision_plans
+    ADD COLUMN IF NOT EXISTS generation_id BIGINT NULL REFERENCES ai_jobs(id) ON DELETE SET NULL;
 
-CREATE TABLE revision_plan_progress (
+CREATE TABLE IF NOT EXISTS revision_plan_progress (
     user_id   BIGINT      NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
     fc_id     BIGINT      NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
     plan_date DATE        NOT NULL,
     done_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, fc_id, plan_date)
 );
-CREATE INDEX idx_rpp_user_today ON revision_plan_progress (user_id, plan_date);
+CREATE INDEX IF NOT EXISTS idx_rpp_user_today ON revision_plan_progress (user_id, plan_date);
 `
 
+// setupPlan installs the Spec B revision-plan schema. Idempotent.
 func setupPlan(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, planSchema); err != nil {
 		return fmt.Errorf("exec plan schema:\n%w", err)

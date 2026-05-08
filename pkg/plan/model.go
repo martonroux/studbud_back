@@ -31,12 +31,13 @@ type Day struct {
 
 // Plan is the persisted output of a generation run.
 type Plan struct {
-	ID          int64     `json:"id"`          // ID is the BIGSERIAL primary key
-	ExamID      int64     `json:"examId"`      // ExamID is the owning exam
-	Days        []Day     `json:"days"`        // Days is the per-day schedule from today → exam date
-	Model       string    `json:"model"`       // Model is the AI model identifier used to generate the plan
-	PromptHash  string    `json:"promptHash"`  // PromptHash captures the prompt revision for debugging plan drift
-	GeneratedAt time.Time `json:"generatedAt"` // GeneratedAt is the persistence timestamp
+	ID           int64     `json:"id"`                     // ID is the BIGSERIAL primary key
+	ExamID       int64     `json:"examId"`                 // ExamID is the owning exam
+	Days         []Day     `json:"days"`                   // Days is the per-day schedule from today → exam date
+	Model        string    `json:"model"`                  // Model is the AI model identifier used to generate the plan
+	PromptHash   string    `json:"promptHash"`             // PromptHash captures the prompt revision for debugging plan drift
+	GeneratedAt  time.Time `json:"generatedAt"`            // GeneratedAt is the persistence timestamp
+	GenerationID *int64    `json:"generationId,omitempty"` // GenerationID is the ai_jobs row id that produced this plan (nil for legacy rows)
 }
 
 // TodayBucket is the projection of a single day's plan plus per-card completion flags.
