@@ -17,7 +17,7 @@ const shortlistSQL = `
 WITH primary_keywords AS (
     SELECT DISTINCT fk.keyword
     FROM flashcards fc
-    JOIN flashcard_keywords fk ON fk.flashcard_id = fc.id
+    JOIN flashcard_keywords fk ON fk.fc_id = fc.id
     WHERE fc.subject_id = $2
 ),
 accessible_subjects AS (
@@ -34,13 +34,13 @@ accessible_subjects AS (
         WHERE s.visibility = 'friends'
 ),
 candidate_fcs AS (
-    SELECT fk.flashcard_id AS fc_id, COUNT(*) AS overlap_score, SUM(fk.weight) AS weight_sum
+    SELECT fk.fc_id AS fc_id, COUNT(*) AS overlap_score, SUM(fk.weight) AS weight_sum
     FROM flashcard_keywords fk
     JOIN primary_keywords pk ON pk.keyword = fk.keyword
-    JOIN flashcards fc ON fc.id = fk.flashcard_id
+    JOIN flashcards fc ON fc.id = fk.fc_id
     WHERE fc.subject_id <> $2
       AND fc.subject_id IN (SELECT id FROM accessible_subjects)
-    GROUP BY fk.flashcard_id
+    GROUP BY fk.fc_id
     HAVING COUNT(*) >= $3
 )
 SELECT fc.id, fc.title, fc.subject_id, s.name, c.overlap_score, c.weight_sum
@@ -105,8 +105,8 @@ func attachKeywords(ctx context.Context, db *pgxpool.Pool, cs []Candidate) ([]Ca
 // loadKeywords fetches the keyword list for each flashcard ID in one query.
 func loadKeywords(ctx context.Context, db *pgxpool.Pool, ids []int64) (map[int64][]string, error) {
 	rows, err := db.Query(ctx, `
-        SELECT flashcard_id, keyword FROM flashcard_keywords
-        WHERE flashcard_id = ANY($1)
+        SELECT fc_id, keyword FROM flashcard_keywords
+        WHERE fc_id = ANY($1)
     `, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load keywords:\n%w", err)
