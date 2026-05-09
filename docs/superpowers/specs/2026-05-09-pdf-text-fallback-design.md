@@ -14,7 +14,7 @@ We need a complementary text-only path that the frontend can fall back to when i
 - Reject PDFs that would fail in image mode **up front** (before rasterizing or debiting quota) when we can predict it.
 - Map late provider failures (context overflow, payload too large) to the same recoverable error code so the frontend has one branch to handle.
 - Offer a text-mode retry path on the same endpoint, governed by its own caps.
-- Refund quota when the user is asked to retry due to an image-mode failure.
+- Avoid charging quota for failures the user is being asked to retry. (The current pipeline only debits quota on success, so this is satisfied without explicit refund logic — see §components.)
 
 ## Non-goals
 
@@ -125,18 +125,13 @@ New helper `classifyProviderError(err, hadImages bool) error`. Pattern-matches A
 
 ### `pkg/aipipeline/service_generation.go`
 
-Two touches:
+One touch: at the start of `streamOnce` (before calling the provider), classify the result of `s.provider.Stream(...)` with `classifyProviderError(err, len(req.Images) > 0)` so the SSE error chunk and `ai_jobs` row carry the right code.
 
-1. Wrap the provider error path with `classifyProviderError(err, len(req.Images) > 0)` before forwarding to the SSE error chunk.
-2. After classification: if the result is `ErrPDFImageModeUnavailable` **and** quota was already debited, issue a refund. Implementation depends on whether the existing `sqlDebitPDFPages` accepts negative deltas:
-   - If yes: `DebitQuota(ctx, uid, FeatureGenerateFromPDF, -1, -req.PDFPages)`.
-   - If no (e.g. `GREATEST(0, ...)`): add a new `RefundQuota` method running the inverse update.
-
-To be confirmed at implementation time by reading `quota.go`.
+**No quota refund needed.** The pipeline only calls `DebitQuota` on successful completion (`finalize` → `if r.emitted > 0`). Pre-flight rejection and provider-error paths never debit, so there is nothing to undo. This satisfies the design intent ("don't punish the user with quota loss when we ask them to retry") for free.
 
 ### `pkg/aipipeline/quota.go`
 
-Verify that the debit SQL accepts negative deltas. If not, add a `RefundQuota(ctx, uid, feat, calls, pages)` method. No other changes; no new public types.
+No changes. (`sqlDebitPDFPages` already uses an additive `pdf_pages + $2` update, so even if a future refactor moves debit to job-start, supporting refund is a one-line follow-up — not part of this work.)
 
 ### `api/handler/ai_pdf.go`
 
@@ -161,10 +156,9 @@ No changes. `AIRequest.Images` is already `nil`-friendly. Mode is carried throug
 
 - `internal/aiProvider/pdf_test.go` — `PDFToText` happy path on `testdata/sample.pdf`; empty-pdf error path.
 - `api/handler/ai_pdf_test.go` (new) — image mode rejects > 30-page PDF with `pdf_image_mode_unavailable`; text mode rejects > 200 pages with `pdf_too_many_pages`; text mode rejects > 400 000 chars with `pdf_text_too_long`; text mode reaches the generator with `Images: nil`.
-- `pkg/aipipeline/quota_test.go` — debit then refund leaves the counter at its starting value.
-- `pkg/aipipeline/service_generation_test.go` — provider returns a context-overflow error in image mode → SSE error chunk has code `pdf_image_mode_unavailable` and PDF page quota is refunded.
+- `pkg/aipipeline/errors_test.go` (new) — `classifyProviderError` returns `ErrPDFImageModeUnavailable` for known overflow patterns when `hadImages` is true; passes through other errors and image-less calls unchanged.
+- `pkg/aipipeline/service_generation_test.go` — provider returns a context-overflow error in image mode → SSE error chunk has code `pdf_image_mode_unavailable`; quota is unchanged (since debit happens only on success today, this is just an assertion that the failure path remains side-effect-free).
 
 ## Open items deferred to implementation
 
-- Whether `sqlDebitPDFPages` accepts negative deltas (determines refund implementation shape).
-- Exact substring set used by `classifyProviderError` — finalize against a fixture of actual Anthropic error bodies.
+- Exact substring set used by `classifyProviderError` — start with `"prompt is too long"`, `"exceed"`, `"context_length"`, and any HTTP 413 wrapper; widen as we observe real production responses.
