@@ -14,6 +14,21 @@ import (
 	"studbud/backend/pkg/aipipeline"
 )
 
+const (
+	// pdfImageModeMaxPages caps the page count we send to the vision model.
+	// Above this, the handler returns ErrPDFImageModeUnavailable so the
+	// frontend can offer text-mode retry.
+	pdfImageModeMaxPages = 30
+
+	// pdfTextModeMaxPages caps the page count for text-mode generation.
+	pdfTextModeMaxPages = 200
+
+	// pdfTextModeMaxChars caps the total extracted character count for
+	// text-mode generation. ~400k chars is a comfortable buffer below
+	// Claude's 200k-token context window.
+	pdfTextModeMaxChars = 400_000
+)
+
 // pdfGenInput captures the form fields for POST /ai/flashcards/pdf.
 type pdfGenInput struct {
 	SubjectID    int64  // SubjectID is the target subject
@@ -31,6 +46,19 @@ func (h *AIHandler) GenerateFromPDF(w http.ResponseWriter, r *http.Request) {
 	in, err := parsePDFForm(r)
 	if err != nil {
 		httpx.WriteError(w, err)
+		return
+	}
+	pages, err := aiProvider.PDFPageCount(in.PDFBytes)
+	if err != nil {
+		httpx.WriteError(w, &myErrors.AppError{Code: "pdf_unreadable", Message: err.Error(), Wrapped: myErrors.ErrValidation})
+		return
+	}
+	if pages > pdfImageModeMaxPages {
+		httpx.WriteError(w, &myErrors.AppError{
+			Code:    "pdf_image_mode_unavailable",
+			Message: fmt.Sprintf("pdf has %d pages, image mode supports up to %d", pages, pdfImageModeMaxPages),
+			Wrapped: myErrors.ErrPDFImageModeUnavailable,
+		})
 		return
 	}
 	images, err := rasterizePDF(r.Context(), in.PDFBytes)
