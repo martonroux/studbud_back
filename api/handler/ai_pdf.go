@@ -70,17 +70,8 @@ func (h *AIHandler) GenerateFromPDF(w http.ResponseWriter, r *http.Request) {
 // Rejects >30-page PDFs with pdf_image_mode_unavailable so the frontend can
 // offer text-mode retry.
 func (h *AIHandler) runImageMode(ctx context.Context, w http.ResponseWriter, uid int64, in pdfGenInput) {
-	pages, err := aiProvider.PDFPageCount(in.PDFBytes)
-	if err != nil {
-		httpx.WriteError(w, &myErrors.AppError{Code: "pdf_unreadable", Message: err.Error(), Wrapped: myErrors.ErrValidation})
-		return
-	}
-	if pages > pdfImageModeMaxPages {
-		httpx.WriteError(w, &myErrors.AppError{
-			Code:    "pdf_image_mode_unavailable",
-			Message: fmt.Sprintf("pdf has %d pages, image mode supports up to %d", pages, pdfImageModeMaxPages),
-			Wrapped: myErrors.ErrPDFImageModeUnavailable,
-		})
+	if err := checkImageModePageCount(in.PDFBytes); err != nil {
+		httpx.WriteError(w, err)
 		return
 	}
 	images, err := rasterizePDF(ctx, in.PDFBytes)
@@ -94,6 +85,24 @@ func (h *AIHandler) runImageMode(ctx context.Context, w http.ResponseWriter, uid
 		return
 	}
 	h.runPDFGeneration(ctx, w, uid, in, rendered, images)
+}
+
+// checkImageModePageCount verifies the PDF has at most pdfImageModeMaxPages.
+// Returns pdf_unreadable on count failure, pdf_image_mode_unavailable when
+// over the cap, or nil when within the limit.
+func checkImageModePageCount(pdfBytes []byte) error {
+	pages, err := aiProvider.PDFPageCount(pdfBytes)
+	if err != nil {
+		return &myErrors.AppError{Code: "pdf_unreadable", Message: err.Error(), Wrapped: myErrors.ErrValidation}
+	}
+	if pages > pdfImageModeMaxPages {
+		return &myErrors.AppError{
+			Code:    "pdf_image_mode_unavailable",
+			Message: fmt.Sprintf("pdf has %d pages, image mode supports up to %d", pages, pdfImageModeMaxPages),
+			Wrapped: myErrors.ErrPDFImageModeUnavailable,
+		}
+	}
+	return nil
 }
 
 // runTextMode extracts text per page and sends it as a single text content
@@ -240,8 +249,9 @@ func (h *AIHandler) runPDFGeneration(
 	h.runGenerationWithReq(ctx, w, req)
 }
 
-// runGenerationWithReq is the image-aware sibling of runGeneration.
-// Identical shape; separate name for readability.
+// runGenerationWithReq pushes a fully-assembled AIRequest through the pipeline
+// and forwards the streamed result as SSE to the client. Used by both
+// image and text PDF modes.
 func (h *AIHandler) runGenerationWithReq(ctx context.Context, w http.ResponseWriter, req aipipeline.AIRequest) {
 	ch, jobID, err := h.svc.RunStructuredGeneration(ctx, req)
 	if err != nil {

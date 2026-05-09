@@ -106,3 +106,11 @@ func TestGenerateFromPDF_TextModeAcceptsLargePDF(t *testing.T) {
 		t.Errorf("text mode passed images to provider: got %d", len(cli.LastRequest().Images))
 	}
 }
+
+func TestGenerateFromPDF_TextModeRejectsOver200Pages(t *testing.T) {
+	t.Skip("requires >200-page fixture; add api/handler/testdata/very_large.pdf to enable")
+}
+
+func TestGenerateFromPDF_TextModeRejectsOver400kChars(t *testing.T) {
+	t.Skip("requires text-heavy fixture > 400k chars; add api/handler/testdata/text_heavy.pdf to enable")
+}
