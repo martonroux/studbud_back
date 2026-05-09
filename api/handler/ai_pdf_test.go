@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"testing"
 
+	"studbud/backend/internal/aiProvider"
 	"studbud/backend/testutil"
 )
 
@@ -68,5 +69,40 @@ func TestGenerateFromPDF_ImageModeRejectsOver30Pages(t *testing.T) {
 	}
 	if !bytes.Contains(w.Body.Bytes(), []byte("pdf_image_mode_unavailable")) {
 		t.Errorf("body missing pdf_image_mode_unavailable: %s", w.Body.String())
+	}
+}
+
+func TestGenerateFromPDF_TextModeAcceptsLargePDF(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	subj := testutil.NewSubject(t, pool, u.ID)
+
+	cli := &testutil.FakeAIClient{
+		Chunks: []aiProvider.Chunk{
+			{Text: `{"items":[{"title":"t1","question":"q1","answer":"a1"}]}`, Done: true},
+		},
+	}
+	srv := newAIPDFServer(t, pool, cli)
+	tok := mintToken(t, u.ID, true, false)
+
+	bigPDF := largePDFFixture(t) // same >30-page fixture; text mode tolerates it
+	form, ct := newPDFFormReader(t, subj.ID, "text", bigPDF)
+	req := httptest.NewRequest("POST", "/ai/flashcards/pdf", form)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("event: card")) {
+		t.Errorf("expected card event in stream:\n%s", w.Body.String())
+	}
+	// Verify the provider was called with no images (text mode).
+	if len(cli.LastRequest().Images) != 0 {
+		t.Errorf("text mode passed images to provider: got %d", len(cli.LastRequest().Images))
 	}
 }
