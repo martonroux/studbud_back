@@ -21,6 +21,9 @@ func classifyProviderStartErr(err error) error {
 	if errors.Is(err, myErrors.ErrAIProvider) {
 		return err
 	}
+	if errors.Is(err, myErrors.ErrPDFImageModeUnavailable) {
+		return err
+	}
 	return &myErrors.AppError{Code: "provider_5xx", Message: "AI service failed before streaming", Wrapped: myErrors.ErrAIProvider}
 }
 

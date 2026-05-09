@@ -129,7 +129,8 @@ func (s *Service) streamOnce(ctx context.Context, req AIRequest, jobID int64, ou
 		MaxTokens:  16384,
 	})
 	if err != nil {
-		return streamResult{err: classifyProviderStartErr(err)}
+		classified := classifyProviderError(err, len(req.Images) > 0)
+		return streamResult{err: classifyProviderStartErr(classified)}
 	}
 	return s.consumeStream(ctx, chunks, out, req.DropChapters)
 }

@@ -43,3 +43,15 @@ func TestClassifyProviderError_NilPassThrough(t *testing.T) {
 		t.Errorf("nil err should pass through, got %v", got)
 	}
 }
+
+func TestClassifyProviderStartErr_PassesThroughImageModeUnavailable(t *testing.T) {
+	src := &myErrors.AppError{
+		Code:    "pdf_image_mode_unavailable",
+		Message: "x",
+		Wrapped: myErrors.ErrPDFImageModeUnavailable,
+	}
+	got := classifyProviderStartErr(src)
+	if !errors.Is(got, myErrors.ErrPDFImageModeUnavailable) {
+		t.Fatalf("classifyProviderStartErr swallowed image-mode-unavailable: %v", got)
+	}
+}
