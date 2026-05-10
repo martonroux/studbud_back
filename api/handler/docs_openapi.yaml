@@ -994,8 +994,15 @@ paths:
       description: |
         multipart/form-data. Same SSE event shape as `/ai/flashcards/prompt`.
 
-        Limits: 20 MB body, 30 s per-page render timeout. Page count is
-        bounded implicitly by the upload size cap.
+        Two generation modes:
+          - `image` (default) rasterizes each page and sends images to the model.
+            Hard-capped at 30 pages; over-cap requests return
+            `pdf_image_mode_unavailable` so the client can offer text-mode retry.
+          - `text` extracts the document text only (via go-fitz) and sends it as
+            a single text content block. Used as a fallback when image mode is
+            rejected. Capped at 200 pages and 400_000 extracted characters.
+
+        Limits: 20 MB body, 30 s per-page render timeout.
       requestBody:
         required: true
         content:
@@ -1010,6 +1017,16 @@ paths:
                 style: { type: string, enum: [short, standard, detailed], default: standard }
                 focus: { type: string }
                 auto_chapters: { type: string, enum: ["true", "false"] }
+                mode:
+                  type: string
+                  enum: [image, text]
+                  default: image
+                  description: |
+                    Generation mode. `image` (default) rasterizes pages and sends
+                    images to the model. `text` extracts the document text only —
+                    used as a fallback when image mode is rejected. The frontend
+                    re-submits with `mode=text` after a `pdf_image_mode_unavailable`
+                    error.
                 file: { type: string, format: binary }
       responses:
         '200':
@@ -1022,8 +1039,23 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '413':
+          description: |
+            Content too large. Codes: `pdf_too_many_pages` (text mode, > 200 pages),
+            `pdf_text_too_long` (text mode, > 400 000 extracted characters).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: |
+            Image-mode generation is not viable for this PDF. The client should
+            offer the user a text-mode retry by re-submitting with `mode=text`.
+            Code: `pdf_image_mode_unavailable`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '429':
-          description: Quota exceeded or PDF too large
+          description: Daily quota exceeded, or upload exceeds 20 MB (`pdf_too_large`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }

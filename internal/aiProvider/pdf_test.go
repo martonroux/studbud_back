@@ -54,12 +54,48 @@ func TestPDFPageCount_ValidPDF(t *testing.T) {
 	}
 }
 
+func TestPDFToText_ReturnsOneStringPerPage(t *testing.T) {
+	pdf := loadTextPDF(t)
+	pages, err := aiProvider.PDFToText(context.Background(), pdf)
+	if err != nil {
+		t.Fatalf("PDFToText: %v", err)
+	}
+	if len(pages) == 0 {
+		t.Fatal("no pages returned")
+	}
+	for i, p := range pages {
+		if p == "" {
+			t.Errorf("pages[%d] is empty (sample_with_text.pdf is expected to have text on every page)", i)
+		}
+	}
+}
+
+func TestPDFToText_RejectsEmptyBytes(t *testing.T) {
+	_, err := aiProvider.PDFToText(context.Background(), nil)
+	if err == nil {
+		t.Error("want error on nil bytes")
+	}
+}
+
 func loadTestPDF(t *testing.T) []byte {
 	t.Helper()
 	path := filepath.Join("testdata", "sample.pdf")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Skipf("no test PDF at %s: %v", path, err)
+	}
+	return b
+}
+
+// loadTextPDF returns the bytes of testdata/sample_with_text.pdf — a
+// minimal multi-page PDF that has extractable text on every page.
+// Use this for tests that exercise the text-extraction path.
+func loadTextPDF(t *testing.T) []byte {
+	t.Helper()
+	path := filepath.Join("testdata", "sample_with_text.pdf")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read sample_with_text.pdf: %v", err)
 	}
 	return b
 }
