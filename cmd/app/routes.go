@@ -113,6 +113,7 @@ func registerAuthSocialRoutes(mux *http.ServeMux, d *deps, auth func(http.Handle
 	mux.Handle("GET /achievements", auth(gamH.Achievements))
 	mux.Handle("POST /billing/checkout", auth(billH.Checkout))
 	mux.Handle("POST /billing/portal", auth(billH.Portal))
+	mux.Handle("POST /billing/refresh", auth(billH.Refresh))
 }
 
 // registerVerifiedRoutes attaches routes that require authentication and email verification.

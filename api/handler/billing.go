@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
+	"time"
+
+	"golang.org/x/time/rate"
 
 	"studbud/backend/internal/authctx"
 	"studbud/backend/internal/httpx"
@@ -21,11 +25,50 @@ type BillingHandler struct {
 	billingPageURL string           // billingPageURL is the Stripe checkout success redirect
 	pricingPageURL string           // pricingPageURL is the Stripe checkout cancel redirect
 	expectLive     bool             // expectLive mirrors STRIPE_MODE=="live"
+	limMu          sync.Mutex       // limMu guards lim
+	lim            map[int64]*rate.Limiter // lim holds per-user rate limiters
 }
 
 // NewBillingHandler constructs a BillingHandler.
 func NewBillingHandler(svc *billing.Service, users *user.Service, billingPageURL, pricingPageURL string) *BillingHandler {
-	return &BillingHandler{svc: svc, users: users, billingPageURL: billingPageURL, pricingPageURL: pricingPageURL}
+	return &BillingHandler{
+		svc:            svc,
+		users:          users,
+		billingPageURL: billingPageURL,
+		pricingPageURL: pricingPageURL,
+		lim:            map[int64]*rate.Limiter{},
+	}
+}
+
+// limiterFor returns the rate.Limiter for uid, creating it if absent.
+// Allows 10 calls per minute with no additional burst.
+func (h *BillingHandler) limiterFor(uid int64) *rate.Limiter {
+	h.limMu.Lock()
+	defer h.limMu.Unlock()
+	l, ok := h.lim[uid]
+	if !ok {
+		l = rate.NewLimiter(rate.Every(time.Minute/10), 10)
+		h.lim[uid] = l
+	}
+	return l
+}
+
+// Refresh handles POST /billing/refresh.
+func (h *BillingHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	if uid == 0 {
+		httpx.WriteError(w, myErrors.ErrUnauthenticated)
+		return
+	}
+	if !h.limiterFor(uid).Allow() {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+	if err := h.svc.RefreshFromStripe(r.Context(), uid); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "refreshed"})
 }
 
 // checkoutInput is the request body for POST /billing/checkout.
