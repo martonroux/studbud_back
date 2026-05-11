@@ -26,17 +26,6 @@ func NewService(db *pgxpool.Pool, provider billingadapter.Client, prices PriceMa
 // Prices exposes the PriceMap to callers (handlers) that need to read it.
 func (s *Service) Prices() PriceMap { return s.prices }
 
-// CreateCheckoutSession returns a URL the user must visit to pay.
-// Stub: not implemented until Spec C.
-func (s *Service) CreateCheckoutSession(ctx context.Context, uid int64, tier string) (string, error) {
-	return "", myErrors.ErrNotImplemented
-}
-
-// CreatePortalSession returns a URL for the Stripe customer portal.
-func (s *Service) CreatePortalSession(ctx context.Context, uid int64) (string, error) {
-	return "", myErrors.ErrNotImplemented
-}
-
 // HandleWebhook processes a Stripe webhook payload.
 func (s *Service) HandleWebhook(ctx context.Context, signature string, body []byte) error {
 	return myErrors.ErrNotImplemented
