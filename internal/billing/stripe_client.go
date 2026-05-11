@@ -3,72 +3,35 @@ package billing
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	stripe "github.com/stripe/stripe-go/v76"
-	portalsession "github.com/stripe/stripe-go/v76/billingportal/session"
-	checkoutsession "github.com/stripe/stripe-go/v76/checkout/session"
-	stripewebhook "github.com/stripe/stripe-go/v76/webhook"
+	"github.com/stripe/stripe-go/v76/customer"
 )
 
-// StripeClient implements Client using the Stripe API.
+// StripeClient implements Client using the real Stripe API.
 type StripeClient struct {
-	secretKey      string
-	webhookSecret  string
-	priceProMonth  string
-	priceProAnnual string
-	successURL     string
-	cancelURL      string
+	webhookSecret string
 }
 
-// NewStripeClient initialises a StripeClient and sets the global Stripe key.
-func NewStripeClient(secretKey, webhookSecret, priceProMonth, priceProAnnual, appURL string) *StripeClient {
+// NewStripeClient initialises a StripeClient and sets the global Stripe secret key.
+func NewStripeClient(secretKey, webhookSecret string) *StripeClient {
 	stripe.Key = secretKey
-	return &StripeClient{
-		secretKey:      secretKey,
-		webhookSecret:  webhookSecret,
-		priceProMonth:  priceProMonth,
-		priceProAnnual: priceProAnnual,
-		successURL:     appURL + "/billing/success",
-		cancelURL:      appURL + "/billing/cancel",
-	}
+	return &StripeClient{webhookSecret: webhookSecret}
 }
 
-// CreateCheckout opens a Stripe Checkout session for the given user and price.
-func (c *StripeClient) CreateCheckout(ctx context.Context, uid int64, priceID string) (*CheckoutSession, error) {
-	params := &stripe.CheckoutSessionParams{
-		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
-		LineItems: []*stripe.CheckoutSessionLineItemParams{
-			{Price: stripe.String(priceID), Quantity: stripe.Int64(1)},
+// CreateCustomer creates a Stripe customer for the given email and user ID.
+// The user ID is stored in the customer's metadata under the "user_id" key.
+func (c *StripeClient) CreateCustomer(ctx context.Context, email string, userID int64) (string, error) {
+	params := &stripe.CustomerParams{
+		Email: stripe.String(email),
+		Metadata: map[string]string{
+			"user_id": strconv.FormatInt(userID, 10),
 		},
-		SuccessURL:        stripe.String(c.successURL),
-		CancelURL:         stripe.String(c.cancelURL),
-		ClientReferenceID: stripe.String(fmt.Sprintf("%d", uid)),
 	}
-	s, err := checkoutsession.New(params)
+	cus, err := customer.New(params)
 	if err != nil {
-		return nil, fmt.Errorf("stripe checkout session:\n%w", err)
+		return "", fmt.Errorf("stripe create customer:\n%w", err)
 	}
-	return &CheckoutSession{URL: s.URL, ID: s.ID}, nil
-}
-
-// CreatePortal opens a Stripe Customer Portal session for the given customer.
-func (c *StripeClient) CreatePortal(ctx context.Context, stripeCustomerID, returnURL string) (string, error) {
-	params := &stripe.BillingPortalSessionParams{
-		Customer:  stripe.String(stripeCustomerID),
-		ReturnURL: stripe.String(returnURL),
-	}
-	s, err := portalsession.New(params)
-	if err != nil {
-		return "", fmt.Errorf("stripe portal session:\n%w", err)
-	}
-	return s.URL, nil
-}
-
-// VerifyWebhook validates the Stripe-Signature header and returns the event payload.
-func (c *StripeClient) VerifyWebhook(payload []byte, signature string) error {
-	_, err := stripewebhook.ConstructEvent(payload, signature, c.webhookSecret)
-	if err != nil {
-		return fmt.Errorf("stripe webhook signature:\n%w", err)
-	}
-	return nil
+	return cus.ID, nil
 }
