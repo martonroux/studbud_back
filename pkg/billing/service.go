@@ -7,7 +7,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	billingadapter "studbud/backend/internal/billing"
-	"studbud/backend/internal/myErrors"
 )
 
 // Service wraps the billing provider (Stripe in prod, fake in tests).
@@ -25,11 +24,6 @@ func NewService(db *pgxpool.Pool, provider billingadapter.Client, prices PriceMa
 
 // Prices exposes the PriceMap to callers (handlers) that need to read it.
 func (s *Service) Prices() PriceMap { return s.prices }
-
-// HandleWebhook processes a Stripe webhook payload.
-func (s *Service) HandleWebhook(ctx context.Context, signature string, body []byte) error {
-	return myErrors.ErrNotImplemented
-}
 
 // GrantComp inserts or revokes a complimentary (comp) AI subscription for uid.
 // active=true upserts a row with plan='comp', status='comped'.
