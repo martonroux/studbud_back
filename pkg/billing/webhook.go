@@ -60,9 +60,3 @@ func (s *Service) recordEvent(ctx context.Context, event *billingadapter.Webhook
 	return false, fmt.Errorf("record event:\n%w", err)
 }
 
-// dispatch routes the event by Type. Implemented in webhook_dispatch.go.
-// For Task 20 alone, the stub returns nil.
-func (s *Service) dispatch(ctx context.Context, event *billingadapter.WebhookEvent) error {
-	// TODO: replaced in Task 21
-	return nil
-}
