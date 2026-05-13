@@ -136,6 +136,66 @@ func (h *QuizHandler) Start(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// answerRequest is the JSON shape for POST /quizzes/{id}/attempts/{aid}/answer.
+type answerRequest struct {
+	QuestionID int64           `json:"questionId"`
+	Answer     json.RawMessage `json:"answer"`
+}
+
+// Answer handles POST /quizzes/{id}/attempts/{aid}/answer.
+func (h *QuizHandler) Answer(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	aid, err := attemptIDFromPath(r)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	var body answerRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteError(w, fmt.Errorf("%w: %s", myErrors.ErrInvalidInput, err))
+		return
+	}
+	res, err := h.svc.Answer(r.Context(), uid, aid, body.QuestionID, body.Answer)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, res)
+}
+
+// Abandon handles POST /quizzes/{id}/attempts/{aid}/abandon.
+// Returns 204 No Content on success.
+func (h *QuizHandler) Abandon(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	aid, err := attemptIDFromPath(r)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if err := h.svc.Abandon(r.Context(), uid, aid); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Retake handles POST /quizzes/{id}/retake.
+// Returns 409 Conflict if an in-progress attempt already exists.
+func (h *QuizHandler) Retake(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	qid, err := quizIDFromPath(r)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	att, err := h.svc.Retake(r.Context(), uid, qid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"attemptId": att.ID})
+}
+
 // Resume handles GET /quizzes/{id}/attempts/{aid}/resume.
 // Returns the attempt's current state + next-unanswered question + progress.
 func (h *QuizHandler) Resume(w http.ResponseWriter, r *http.Request) {

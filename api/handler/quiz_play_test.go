@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -89,5 +90,81 @@ func TestGetResume_ReturnsCurrentPosition(t *testing.T) {
 	}
 	if resp.State != "in_progress" {
 		t.Fatalf("state = %q, want in_progress", resp.State)
+	}
+}
+
+func TestPostAnswer_CorrectMCQ(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	qid := testutil.NewQuiz(t, pool, u.ID, 2) // 2 MCQ, correct index = 2
+
+	qsvc := quiz.NewService(pool, nil)
+	att, q1, _, _ := qsvc.Start(context.Background(), u.ID, qid)
+
+	h := handler.NewQuizHandler(qsvc, access.NewService(pool))
+	body, _ := json.Marshal(map[string]any{
+		"questionId": q1.ID,
+		"answer":     map[string]int{"index": 2},
+	})
+	req := httptest.NewRequest("POST", "/quizzes/{id}/attempts/{aid}/answer", bytes.NewReader(body))
+	req.SetPathValue("id", strconv.FormatInt(qid, 10))
+	req.SetPathValue("aid", strconv.FormatInt(att.ID, 10))
+	req = req.WithContext(authctx.WithIdentity(context.Background(), u.ID, true, false))
+	w := httptest.NewRecorder()
+	h.Answer(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Correct bool `json:"correct"`
+		Next    *struct {
+			Ordinal int `json:"ordinal"`
+		} `json:"nextQuestion"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.Correct {
+		t.Fatalf("not marked correct")
+	}
+}
+
+func TestPostAbandon_204(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	qid := testutil.NewQuiz(t, pool, u.ID, 2)
+
+	qsvc := quiz.NewService(pool, nil)
+	att, _, _, _ := qsvc.Start(context.Background(), u.ID, qid)
+
+	h := handler.NewQuizHandler(qsvc, access.NewService(pool))
+	req := httptest.NewRequest("POST", "/quizzes/{id}/attempts/{aid}/abandon", nil)
+	req.SetPathValue("id", strconv.FormatInt(qid, 10))
+	req.SetPathValue("aid", strconv.FormatInt(att.ID, 10))
+	req = req.WithContext(authctx.WithIdentity(context.Background(), u.ID, true, false))
+	w := httptest.NewRecorder()
+	h.Abandon(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestPostRetake_409IfInProgress(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	qid := testutil.NewQuiz(t, pool, u.ID, 2)
+
+	qsvc := quiz.NewService(pool, nil)
+	_, _, _, _ = qsvc.Start(context.Background(), u.ID, qid)
+
+	h := handler.NewQuizHandler(qsvc, access.NewService(pool))
+	req := httptest.NewRequest("POST", "/quizzes/{id}/retake", nil)
+	req.SetPathValue("id", strconv.FormatInt(qid, 10))
+	req = req.WithContext(authctx.WithIdentity(context.Background(), u.ID, true, false))
+	w := httptest.NewRecorder()
+	h.Retake(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status %d", w.Code)
 	}
 }
