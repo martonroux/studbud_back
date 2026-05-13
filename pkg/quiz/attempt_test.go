@@ -3,8 +3,10 @@ package quiz_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"studbud/backend/internal/myErrors"
 	"studbud/backend/pkg/quiz"
 	"studbud/backend/testutil"
 )
@@ -124,5 +126,41 @@ func TestAnswer_DoubleSubmit_NoOp(t *testing.T) {
 		`SELECT count(*) FROM quiz_attempt_answers WHERE attempt_id=$1`, att.ID).Scan(&n)
 	if n != 1 {
 		t.Fatalf("got %d answer rows, want 1 (idempotent)", n)
+	}
+}
+
+func TestAbandon_FreesInProgressSlot(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	qid := testutil.NewQuiz(t, pool, u.ID, 2)
+
+	svc := quiz.NewService(pool, nil)
+	a1, _, _, _ := svc.Start(context.Background(), u.ID, qid)
+	if err := svc.Abandon(context.Background(), u.ID, a1.ID); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+
+	// A retake (= new attempt) should now succeed.
+	a2, err := svc.Retake(context.Background(), u.ID, qid)
+	if err != nil {
+		t.Fatalf("retake after abandon: %v", err)
+	}
+	if a2.ID == a1.ID {
+		t.Fatalf("retake should not reuse abandoned attempt")
+	}
+}
+
+func TestRetake_BlockedWhileInProgress(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	qid := testutil.NewQuiz(t, pool, u.ID, 2)
+
+	svc := quiz.NewService(pool, nil)
+	_, _, _, _ = svc.Start(context.Background(), u.ID, qid)
+	_, err := svc.Retake(context.Background(), u.ID, qid)
+	if !errors.Is(err, myErrors.ErrConflict) {
+		t.Fatalf("want ErrConflict, got %v", err)
 	}
 }

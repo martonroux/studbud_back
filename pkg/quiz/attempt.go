@@ -250,6 +250,43 @@ func (s *Service) loadQuestion(ctx context.Context, qid, quizID int64) (Question
 	return q, nil
 }
 
+// Abandon marks an in-progress attempt as abandoned, freeing the partial-UNIQUE
+// in_progress slot. No-op when the attempt is already completed.
+func (s *Service) Abandon(ctx context.Context, uid, attemptID int64) error {
+	att, err := s.loadAttempt(ctx, attemptID)
+	if err != nil {
+		return err
+	}
+	if att.UserID != uid {
+		return myErrors.ErrForbidden
+	}
+	if att.State == StateCompleted {
+		return nil
+	}
+	if _, err := s.db.Exec(ctx,
+		`UPDATE quiz_attempts SET state='abandoned' WHERE id=$1 AND state='in_progress'`,
+		attemptID); err != nil {
+		return fmt.Errorf("abandon:\n%w", err)
+	}
+	return nil
+}
+
+// Retake creates a fresh attempt over the same questions. Returns ErrConflict (409)
+// if the user already has an in-progress attempt on this quiz.
+func (s *Service) Retake(ctx context.Context, uid, quizID int64) (Attempt, error) {
+	if err := s.requireQuizOwner(ctx, uid, quizID); err != nil {
+		return Attempt{}, err
+	}
+	_, err := s.findInProgress(ctx, uid, quizID)
+	if err == nil {
+		return Attempt{}, fmt.Errorf("%w: in-progress attempt exists", myErrors.ErrConflict)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Attempt{}, err
+	}
+	return s.createAttempt(ctx, uid, quizID)
+}
+
 // completeAttempt marks the attempt as completed and computes score_pct.
 // Plan D2 will extend this to write revision_plan_progress.
 func (s *Service) completeAttempt(ctx context.Context, tx pgx.Tx, attemptID int64) error {
