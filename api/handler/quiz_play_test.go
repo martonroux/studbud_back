@@ -235,7 +235,7 @@ func TestGetHistory_ReturnsAttempts(t *testing.T) {
 	}
 	var resp struct {
 		Attempts []struct {
-			ID int64 `json:"ID"` // pkg/quiz.Attempt has no json tags; fields serialise capitalised
+			ID int64 `json:"id"`
 		} `json:"attempts"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)

@@ -137,17 +137,7 @@ type AnswerResult struct {
 // the correct payload; on a re-submit this may differ from the persisted
 // answer row.
 func (s *Service) Answer(ctx context.Context, uid, attemptID, questionID int64, userAns json.RawMessage) (AnswerResult, error) {
-	att, err := s.loadAttempt(ctx, attemptID)
-	if err != nil {
-		return AnswerResult{}, err
-	}
-	if att.UserID != uid {
-		return AnswerResult{}, myErrors.ErrForbidden
-	}
-	if att.State != StateInProgress {
-		return AnswerResult{}, fmt.Errorf("%w: attempt not in_progress", myErrors.ErrConflict)
-	}
-	q, err := s.loadQuestion(ctx, questionID, att.QuizID)
+	att, q, err := s.loadAnswerContext(ctx, uid, attemptID, questionID)
 	if err != nil {
 		return AnswerResult{}, err
 	}
@@ -155,45 +145,9 @@ func (s *Service) Answer(ctx context.Context, uid, attemptID, questionID int64, 
 	if err != nil {
 		return AnswerResult{}, err
 	}
-
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return AnswerResult{}, fmt.Errorf("begin tx:\n%w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	tag, err := tx.Exec(ctx, `
-		INSERT INTO quiz_attempt_answers (attempt_id, question_id, user_answer_jsonb, correct)
-		VALUES ($1,$2,$3,$4)
-		ON CONFLICT (attempt_id, question_id) DO NOTHING`,
-		attemptID, questionID, userAns, correct)
-	if err != nil {
-		return AnswerResult{}, fmt.Errorf("insert answer:\n%w", err)
-	}
-	inserted := tag.RowsAffected() > 0
-	if inserted && correct {
-		if _, err := tx.Exec(ctx,
-			`UPDATE quiz_attempts SET correct_count = correct_count + 1 WHERE id=$1`,
-			attemptID); err != nil {
-			return AnswerResult{}, fmt.Errorf("bump correct_count:\n%w", err)
-		}
-	}
-
-	var answered int
-	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM quiz_attempt_answers WHERE attempt_id=$1`, attemptID,
-	).Scan(&answered); err != nil {
+	if err := s.commitAnswer(ctx, att, questionID, userAns, correct); err != nil {
 		return AnswerResult{}, err
 	}
-	if answered >= att.TotalCount {
-		if err := s.completeAttempt(ctx, tx, attemptID); err != nil {
-			return AnswerResult{}, err
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return AnswerResult{}, fmt.Errorf("commit:\n%w", err)
-	}
-
 	next, _, err := s.advance(ctx, attemptID)
 	if err != nil {
 		return AnswerResult{}, err
@@ -204,6 +158,64 @@ func (s *Service) Answer(ctx context.Context, uid, attemptID, questionID int64, 
 		Explanation:   q.Explanation,
 		Next:          next,
 	}, nil
+}
+
+// loadAnswerContext validates ownership + state and loads the question.
+func (s *Service) loadAnswerContext(ctx context.Context, uid, attemptID, questionID int64) (Attempt, Question, error) {
+	att, err := s.loadAttempt(ctx, attemptID)
+	if err != nil {
+		return Attempt{}, Question{}, err
+	}
+	if att.UserID != uid {
+		return Attempt{}, Question{}, myErrors.ErrForbidden
+	}
+	if att.State != StateInProgress {
+		return Attempt{}, Question{}, fmt.Errorf("%w: attempt not in_progress", myErrors.ErrConflict)
+	}
+	q, err := s.loadQuestion(ctx, questionID, att.QuizID)
+	if err != nil {
+		return Attempt{}, Question{}, err
+	}
+	return att, q, nil
+}
+
+// commitAnswer runs the persistence tx: insert answer, bump correct_count,
+// flip to completed on the final answer. Idempotent on (attempt_id, question_id).
+func (s *Service) commitAnswer(ctx context.Context, att Attempt, questionID int64, userAns json.RawMessage, correct bool) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx:\n%w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO quiz_attempt_answers (attempt_id, question_id, user_answer_jsonb, correct)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (attempt_id, question_id) DO NOTHING`,
+		att.ID, questionID, userAns, correct)
+	if err != nil {
+		return fmt.Errorf("insert answer:\n%w", err)
+	}
+	inserted := tag.RowsAffected() > 0
+	if inserted && correct {
+		if _, err := tx.Exec(ctx,
+			`UPDATE quiz_attempts SET correct_count = correct_count + 1 WHERE id=$1`,
+			att.ID); err != nil {
+			return fmt.Errorf("bump correct_count:\n%w", err)
+		}
+	}
+	var answered int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM quiz_attempt_answers WHERE attempt_id=$1`, att.ID,
+	).Scan(&answered); err != nil {
+		return err
+	}
+	if answered >= att.TotalCount {
+		if err := s.completeAttempt(ctx, tx, att.ID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // loadAttempt fetches a quiz_attempts row by id; returns ErrNotFound if missing.

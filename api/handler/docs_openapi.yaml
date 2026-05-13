@@ -2195,19 +2195,19 @@ components:
 
     QuizAttempt:
       type: object
-      description: Persistent quiz_attempts row. Field names use PascalCase to match Go's default JSON encoding.
+      description: Persistent quiz_attempts row.
       properties:
-        ID:           { type: integer, format: int64 }
-        QuizID:       { type: integer, format: int64 }
-        UserID:       { type: integer, format: int64 }
-        State:        { type: string, enum: [in_progress, completed, abandoned] }
-        StartedAt:    { type: string, format: date-time }
-        CompletedAt:  { type: string, format: date-time, nullable: true }
-        CorrectCount: { type: integer }
-        TotalCount:   { type: integer }
-        ScorePct:     { type: integer, nullable: true }
-        PlanID:       { type: integer, format: int64, nullable: true }
-        PlanDate:     { type: string, format: date, nullable: true }
+        id:           { type: integer, format: int64 }
+        quizId:       { type: integer, format: int64 }
+        userId:       { type: integer, format: int64 }
+        state:        { type: string, enum: [in_progress, completed, abandoned] }
+        startedAt:    { type: string, format: date-time }
+        completedAt:  { type: string, format: date-time, nullable: true }
+        correctCount: { type: integer }
+        totalCount:   { type: integer }
+        scorePct:     { type: integer, nullable: true }
+        planId:       { type: integer, format: int64, nullable: true }
+        planDate:     { type: string, format: date, nullable: true }
 
     QuizAttemptView:
       type: object

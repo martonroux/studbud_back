@@ -128,17 +128,17 @@ const (
 
 // Attempt is the persisted projection of a quiz_attempts row.
 type Attempt struct {
-	ID           int64        // ID is the BIGSERIAL primary key
-	QuizID       int64        // QuizID is the owning quiz id
-	UserID       int64        // UserID owns the attempt
-	State        AttemptState // State is the lifecycle marker
-	StartedAt    time.Time    // StartedAt is the attempt creation timestamp
-	CompletedAt  *time.Time   // CompletedAt is the completion timestamp (nil while in-progress)
-	CorrectCount int          // CorrectCount counts answered-correctly questions
-	TotalCount   int          // TotalCount is the question count of the parent quiz
-	ScorePct     *int         // ScorePct is the integer percentage (nil while in-progress)
-	PlanID       *int64       // PlanID is non-nil for plan-materialised attempts (Spec D2)
-	PlanDate     *string      // PlanDate is the YYYY-MM-DD bucket for plan-sourced attempts
+	ID           int64        `json:"id"`           // ID is the BIGSERIAL primary key
+	QuizID       int64        `json:"quizId"`       // QuizID is the owning quiz id
+	UserID       int64        `json:"userId"`       // UserID owns the attempt
+	State        AttemptState `json:"state"`        // State is the lifecycle marker
+	StartedAt    time.Time    `json:"startedAt"`    // StartedAt is the attempt creation timestamp
+	CompletedAt  *time.Time   `json:"completedAt"`  // CompletedAt is the completion timestamp (nil while in-progress)
+	CorrectCount int          `json:"correctCount"` // CorrectCount counts answered-correctly questions
+	TotalCount   int          `json:"totalCount"`   // TotalCount is the question count of the parent quiz
+	ScorePct     *int         `json:"scorePct"`     // ScorePct is the integer percentage (nil while in-progress)
+	PlanID       *int64       `json:"planId"`       // PlanID is non-nil for plan-materialised attempts (Spec D2)
+	PlanDate     *string      `json:"planDate"`     // PlanDate is the YYYY-MM-DD bucket for plan-sourced attempts
 }
 
 // Progress is the {answered, total} pill shown during play.
