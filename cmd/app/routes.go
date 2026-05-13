@@ -163,13 +163,20 @@ func registerVerifiedRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFun
 func registerStubRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFunc) http.Handler) {
 	aiH := handler.NewAIHandler(d.ai)
 	quizH := handler.NewQuizHandler(d.quiz, d.access)
-	_ = quizH // wired in Spec D Task 21 once /quizzes/* endpoints land
 	duelH := handler.NewDuelHandler(d.duel)
 
 	mux.Handle("POST /ai/flashcards/prompt", av(aiH.GenerateFromPrompt))
 	mux.Handle("POST /ai/flashcards/pdf", av(aiH.GenerateFromPDF))
 	mux.Handle("POST /ai/check", av(aiH.Check))
 	mux.Handle("POST /ai/commit-generation", av(aiH.CommitGeneration))
+	mux.Handle("POST /quizzes/generate", av(quizH.Generate))
+	mux.Handle("POST /quizzes/{id}/start", av(quizH.Start))
+	mux.Handle("GET /quizzes/{id}/attempts/{aid}/resume", av(quizH.Resume))
+	mux.Handle("POST /quizzes/{id}/attempts/{aid}/answer", av(quizH.Answer))
+	mux.Handle("POST /quizzes/{id}/attempts/{aid}/abandon", av(quizH.Abandon))
+	mux.Handle("POST /quizzes/{id}/retake", av(quizH.Retake))
+	mux.Handle("GET /quizzes/{id}/attempts/{aid}", av(quizH.GetAttempt))
+	mux.Handle("GET /quizzes/{id}/history", av(quizH.History))
 	mux.Handle("POST /duel/invite", av(duelH.Invite))
 	mux.Handle("POST /duel/accept", av(duelH.Accept))
 	mux.Handle("GET /duel/connect", av(duelH.Connect))
