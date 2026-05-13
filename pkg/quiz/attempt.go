@@ -287,6 +287,27 @@ func (s *Service) Retake(ctx context.Context, uid, quizID int64) (Attempt, error
 	return s.createAttempt(ctx, uid, quizID)
 }
 
+// LoadAttemptForUser is the public projection of loadAttempt with an ownership check.
+// Returns ErrForbidden when the attempt is owned by another user.
+func (s *Service) LoadAttemptForUser(ctx context.Context, uid, attemptID int64) (Attempt, error) {
+	att, err := s.loadAttempt(ctx, attemptID)
+	if err != nil {
+		return att, err
+	}
+	if att.UserID != uid {
+		return att, myErrors.ErrForbidden
+	}
+	return att, nil
+}
+
+// AdvanceForUser returns the next-question + progress payload after an ownership check.
+func (s *Service) AdvanceForUser(ctx context.Context, uid, attemptID int64) (*PublicQuestion, Progress, error) {
+	if _, err := s.LoadAttemptForUser(ctx, uid, attemptID); err != nil {
+		return nil, Progress{}, err
+	}
+	return s.advance(ctx, attemptID)
+}
+
 // completeAttempt marks the attempt as completed and computes score_pct.
 // Plan D2 will extend this to write revision_plan_progress.
 func (s *Service) completeAttempt(ctx context.Context, tx pgx.Tx, attemptID int64) error {

@@ -1,0 +1,93 @@
+package handler_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"testing"
+
+	"studbud/backend/api/handler"
+	"studbud/backend/internal/authctx"
+	"studbud/backend/pkg/access"
+	"studbud/backend/pkg/quiz"
+	"studbud/backend/testutil"
+)
+
+func TestPostQuizzesStart_CreatesAttemptAndReturnsFirstQuestion(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	qid := testutil.NewQuiz(t, pool, u.ID, 2)
+
+	qsvc := quiz.NewService(pool, nil)
+	h := handler.NewQuizHandler(qsvc, access.NewService(pool))
+
+	req := httptest.NewRequest("POST", "/quizzes/{id}/start", nil)
+	req.SetPathValue("id", strconv.FormatInt(qid, 10))
+	req = req.WithContext(authctx.WithIdentity(context.Background(), u.ID, true, false))
+	w := httptest.NewRecorder()
+	h.Start(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		AttemptID    int64 `json:"attemptId"`
+		NextQuestion struct {
+			ID      int64  `json:"id"`
+			Ordinal int    `json:"ordinal"`
+			Type    string `json:"type"`
+		} `json:"nextQuestion"`
+		Progress struct {
+			Answered int `json:"answered"`
+			Total    int `json:"total"`
+		} `json:"progress"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, w.Body.String())
+	}
+	if resp.NextQuestion.Ordinal != 1 {
+		t.Fatalf("nextQuestion.Ordinal = %d, want 1", resp.NextQuestion.Ordinal)
+	}
+	if resp.Progress.Total != 2 {
+		t.Fatalf("Total = %d, want 2", resp.Progress.Total)
+	}
+}
+
+func TestGetResume_ReturnsCurrentPosition(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	qid := testutil.NewQuiz(t, pool, u.ID, 2)
+
+	qsvc := quiz.NewService(pool, nil)
+	att, _, _, err := qsvc.Start(context.Background(), u.ID, qid)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	h := handler.NewQuizHandler(qsvc, access.NewService(pool))
+	req := httptest.NewRequest("GET", "/quizzes/{id}/attempts/{aid}/resume", nil)
+	req.SetPathValue("id", strconv.FormatInt(qid, 10))
+	req.SetPathValue("aid", strconv.FormatInt(att.ID, 10))
+	req = req.WithContext(authctx.WithIdentity(context.Background(), u.ID, true, false))
+	w := httptest.NewRecorder()
+	h.Resume(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		AttemptID int64  `json:"attemptId"`
+		State     string `json:"state"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.AttemptID != att.ID {
+		t.Fatalf("attemptId = %d, want %d", resp.AttemptID, att.ID)
+	}
+	if resp.State != "in_progress" {
+		t.Fatalf("state = %q, want in_progress", resp.State)
+	}
+}

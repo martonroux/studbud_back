@@ -114,3 +114,51 @@ func (h *QuizHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		"kind":          res.Kind,
 	})
 }
+
+// Start handles POST /quizzes/{id}/start.
+// Returns the existing in-progress attempt (idempotent) or creates a new one.
+func (h *QuizHandler) Start(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	qid, err := quizIDFromPath(r)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	att, next, prog, err := h.svc.Start(r.Context(), uid, qid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"attemptId":    att.ID,
+		"nextQuestion": next,
+		"progress":     prog,
+	})
+}
+
+// Resume handles GET /quizzes/{id}/attempts/{aid}/resume.
+// Returns the attempt's current state + next-unanswered question + progress.
+func (h *QuizHandler) Resume(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	aid, err := attemptIDFromPath(r)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	att, err := h.svc.LoadAttemptForUser(r.Context(), uid, aid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	next, prog, err := h.svc.AdvanceForUser(r.Context(), uid, aid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"attemptId":    att.ID,
+		"state":        att.State,
+		"nextQuestion": next,
+		"progress":     prog,
+	})
+}
