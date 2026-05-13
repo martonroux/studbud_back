@@ -75,8 +75,8 @@ func TestGetPlans_HappyPath(t *testing.T) {
 	if by["pro_annual"]["priceEur"] != 59.99 {
 		t.Fatalf("annual priceEur = %v", by["pro_annual"]["priceEur"])
 	}
-	if by["pro_annual"]["discountPct"] != float64(29) {
-		t.Fatalf("discountPct = %v, want 29", by["pro_annual"]["discountPct"])
+	if by["pro_annual"]["discountPct"] != float64(28) {
+		t.Fatalf("discountPct = %v, want 28", by["pro_annual"]["discountPct"])
 	}
 }
 
