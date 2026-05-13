@@ -7,6 +7,7 @@ import (
 
 	stripe "github.com/stripe/stripe-go/v76"
 	"github.com/stripe/stripe-go/v76/customer"
+	"github.com/stripe/stripe-go/v76/price"
 )
 
 // StripeClient implements Client using the real Stripe API.
@@ -20,9 +21,21 @@ func NewStripeClient(secretKey, webhookSecret string) *StripeClient {
 	return &StripeClient{webhookSecret: webhookSecret}
 }
 
-// GetPrice is a placeholder; real implementation is added in a later task.
+// GetPrice fetches a Stripe Price by ID and maps it to PriceData.
+// Non-recurring prices return an empty Interval.
 func (c *StripeClient) GetPrice(ctx context.Context, priceID string) (PriceData, error) {
-	return PriceData{}, nil
+	p, err := price.Get(priceID, nil)
+	if err != nil {
+		return PriceData{}, fmt.Errorf("stripe get price %s:\n%w", priceID, err)
+	}
+	out := PriceData{
+		Amount:   p.UnitAmount,
+		Currency: string(p.Currency),
+	}
+	if p.Recurring != nil {
+		out.Interval = string(p.Recurring.Interval)
+	}
+	return out, nil
 }
 
 // CreateCustomer creates a Stripe customer for the given email and user ID.
