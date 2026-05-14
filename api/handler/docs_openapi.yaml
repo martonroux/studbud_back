@@ -4,7 +4,7 @@ info:
   description: |
     HTTP API for the StudBud study-aid backend.
 
-    **Scope:** only implemented routes are documented. Stub routes (quiz, plan, duel) are omitted until their specs ship.
+    **Scope:** only implemented routes are documented. Stub routes (duel) are omitted until their specs ship.
 
     **Auth:** most routes require a JWT bearer token. Use `POST /user-register` or `POST /user-login` to obtain one, then click **Authorize** in Swagger UI and paste the token (without the `Bearer ` prefix).
 
@@ -30,6 +30,7 @@ tags:
   - name: Billing
   - name: Exams
   - name: RevisionPlan
+  - name: Quiz
 
 security:
   - BearerAuth: []
@@ -1455,6 +1456,210 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  # ── Quiz (Spec D) ──────────────────────────────────────────────────────────
+
+  /quizzes/generate:
+    post:
+      tags: [Quiz]
+      summary: Generate a new quiz
+      description: AI-powered quiz generation from the user's flashcards (specific) or subject knowledge (global). Requires AI access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectId, kind, size, types]
+              properties:
+                subjectId:  { type: integer, format: int64 }
+                chapterId:  { type: integer, format: int64, nullable: true }
+                kind:       { type: string, enum: [specific, global] }
+                size:       { type: integer, enum: [5, 10, 15, 20] }
+                types:
+                  type: array
+                  items: { type: string, enum: [multi_choice, true_false, fill_blank] }
+                cardFilter: { type: string, enum: [all, bad_ok, due] }
+      responses:
+        '200':
+          description: Quiz created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quizId:        { type: integer, format: int64 }
+                  questionCount: { type: integer }
+                  kind:          { type: string }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /quizzes/{id}/start:
+    post:
+      tags: [Quiz]
+      summary: Start (or resume) an attempt
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Attempt + first/next question
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attemptId:    { type: integer, format: int64 }
+                  nextQuestion: { $ref: '#/components/schemas/PublicQuestion' }
+                  progress:     { $ref: '#/components/schemas/QuizProgress' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /quizzes/{id}/attempts/{aid}/resume:
+    get:
+      tags: [Quiz]
+      summary: Resume an in-progress attempt
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+        - in: path
+          name: aid
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Current position
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attemptId:    { type: integer, format: int64 }
+                  state:        { type: string }
+                  nextQuestion: { $ref: '#/components/schemas/PublicQuestion' }
+                  progress:     { $ref: '#/components/schemas/QuizProgress' }
+
+  /quizzes/{id}/attempts/{aid}/answer:
+    post:
+      tags: [Quiz]
+      summary: Submit one answer
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+        - in: path
+          name: aid
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questionId, answer]
+              properties:
+                questionId: { type: integer, format: int64 }
+                answer:
+                  oneOf:
+                    - { type: object, properties: { index: { type: integer } }, required: [index] }
+                    - { type: object, properties: { value: { type: boolean } }, required: [value] }
+                    - { type: object, properties: { value: { type: string  } }, required: [value] }
+      responses:
+        '200':
+          description: Scored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  correct:       { type: boolean }
+                  correctAnswer: {}
+                  explanation:   { type: string }
+                  nextQuestion:  { $ref: '#/components/schemas/PublicQuestion', nullable: true }
+
+  /quizzes/{id}/attempts/{aid}/abandon:
+    post:
+      tags: [Quiz]
+      summary: Abandon an in-progress attempt
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+        - in: path
+          name: aid
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204':
+          description: Abandoned
+
+  /quizzes/{id}/retake:
+    post:
+      tags: [Quiz]
+      summary: Start a new attempt over the same questions
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: New attempt id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attemptId: { type: integer, format: int64 }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /quizzes/{id}/attempts/{aid}:
+    get:
+      tags: [Quiz]
+      summary: Full review payload
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+        - in: path
+          name: aid
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: AttemptView
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuizAttemptView' }
+
+  /quizzes/{id}/history:
+    get:
+      tags: [Quiz]
+      summary: All attempts for this quiz by the current user
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Attempts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempts:
+                    type: array
+                    items: { $ref: '#/components/schemas/QuizAttempt' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1485,6 +1690,16 @@ components:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     Conflict:
       description: Conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    PaymentRequired:
+      description: AI subscription required
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    TooManyRequests:
+      description: Daily quota exhausted
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -1960,3 +2175,55 @@ components:
       properties:
         user_id: { type: integer, format: int64 }
         reason: { type: string }
+
+    # ── Quiz schemas (Spec D) ────────────────────────────────────────────────
+
+    PublicQuestion:
+      type: object
+      properties:
+        id:      { type: integer, format: int64 }
+        ordinal: { type: integer }
+        type:    { type: string, enum: [multi_choice, true_false, fill_blank] }
+        stem:    { type: string }
+        options: { type: array, items: { type: string }, nullable: true }
+
+    QuizProgress:
+      type: object
+      properties:
+        answered: { type: integer }
+        total:    { type: integer }
+
+    QuizAttempt:
+      type: object
+      description: Persistent quiz_attempts row.
+      properties:
+        id:           { type: integer, format: int64 }
+        quizId:       { type: integer, format: int64 }
+        userId:       { type: integer, format: int64 }
+        state:        { type: string, enum: [in_progress, completed, abandoned] }
+        startedAt:    { type: string, format: date-time }
+        completedAt:  { type: string, format: date-time, nullable: true }
+        correctCount: { type: integer }
+        totalCount:   { type: integer }
+        scorePct:     { type: integer, nullable: true }
+        planId:       { type: integer, format: int64, nullable: true }
+        planDate:     { type: string, format: date, nullable: true }
+
+    QuizAttemptView:
+      type: object
+      properties:
+        attempt:   { $ref: '#/components/schemas/QuizAttempt' }
+        questions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:            { type: integer, format: int64 }
+              ordinal:       { type: integer }
+              type:          { type: string, enum: [multi_choice, true_false, fill_blank] }
+              stem:          { type: string }
+              options:       { type: array, items: { type: string }, nullable: true }
+              userAnswer:    {}
+              correctAnswer: {}
+              explanation:   { type: string }
+              correct:       { type: boolean, nullable: true }

@@ -23,6 +23,8 @@ const (
 	FeatureGenerateRevisionPlan FeatureKey = "revision_plan"
 	// FeatureCrossSubjectRank is the cross-subject ranking helper (Spec B).
 	FeatureCrossSubjectRank FeatureKey = "cross_subject_rank"
+	// FeatureGenerateQuiz is the on-demand quiz generator (Spec D).
+	FeatureGenerateQuiz FeatureKey = "generate_quiz"
 )
 
 // ChunkKind tags a streamed AIChunk.
@@ -78,6 +80,7 @@ type QuotaLimits struct {
 	PDFPages    int // PDFPages is the daily cap on total PDF pages consumed
 	CheckCalls  int // CheckCalls is the daily cap on successful check calls
 	PlanCalls   int // PlanCalls caps daily revision-plan generations (default 5)
+	QuizCalls   int // QuizCalls caps daily quiz generations (default 10)
 }
 
 // DefaultQuotaLimits returns the v1 starting caps. Tune post-launch.
@@ -88,6 +91,7 @@ func DefaultQuotaLimits() QuotaLimits {
 		PDFPages:    100,
 		CheckCalls:  50,
 		PlanCalls:   5,
+		QuizCalls:   10,
 	}
 }
 
