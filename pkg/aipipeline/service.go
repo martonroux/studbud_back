@@ -46,7 +46,9 @@ type SubjectMeta struct {
 }
 
 // LookupSubject fetches the name of the subject for prompt templating.
-func (s *Service) LookupSubject(ctx context.Context, id int64) (*SubjectMeta, error) {
+// Requires uid to have at least read access to the subject; strangers get
+// ErrForbidden.
+func (s *Service) LookupSubject(ctx context.Context, uid, id int64) (*SubjectMeta, error) {
 	var m SubjectMeta
 	err := s.db.QueryRow(ctx, `SELECT id, name FROM subjects WHERE id = $1`, id).Scan(&m.ID, &m.Name)
 	if err != nil {
@@ -54,6 +56,13 @@ func (s *Service) LookupSubject(ctx context.Context, id int64) (*SubjectMeta, er
 			return nil, myErrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("lookup subject:\n%w", err)
+	}
+	lvl, err := s.access.SubjectLevel(ctx, uid, id)
+	if err != nil {
+		return nil, err
+	}
+	if !lvl.CanRead() {
+		return nil, myErrors.ErrForbidden
 	}
 	return &m, nil
 }

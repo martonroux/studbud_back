@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+
+	"studbud/backend/internal/myErrors"
 )
 
 // CommitChapter is one chapter the client proposes to create.
@@ -42,6 +44,9 @@ func (s *Service) CommitGeneration(ctx context.Context, in CommitInput) (*Commit
 	if len(in.Cards) == 0 {
 		return nil, fmt.Errorf("cards must be non-empty")
 	}
+	if err := s.assertSubjectEditAccess(ctx, in.UserID, in.SubjectID); err != nil {
+		return nil, err
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx:\n%w", err)
@@ -60,6 +65,19 @@ func (s *Service) CommitGeneration(ctx context.Context, in CommitInput) (*Commit
 		return nil, fmt.Errorf("commit tx:\n%w", err)
 	}
 	return &CommitOutput{SubjectID: in.SubjectID, ChapterIDs: chapterIDs, CardIDs: cardIDs}, nil
+}
+
+// assertSubjectEditAccess rejects the commit unless uid can edit subjectID
+// (owner or editor collaborator). Prevents cross-user writes via AI commit.
+func (s *Service) assertSubjectEditAccess(ctx context.Context, uid, subjectID int64) error {
+	lvl, err := s.access.SubjectLevel(ctx, uid, subjectID)
+	if err != nil {
+		return err
+	}
+	if !lvl.CanEdit() {
+		return myErrors.ErrForbidden
+	}
+	return nil
 }
 
 // insertChapters inserts all proposed chapters and returns the ClientID→id map.
@@ -103,13 +121,20 @@ func insertCards(ctx context.Context, tx pgx.Tx, subjectID int64, chapterIDs map
 }
 
 // resolveChapterFK looks up the DB id for a ChapterClientID; empty string means "loose card".
+// An unknown ChapterClientID is a client input mistake, not a server error, so
+// it is reported as ErrValidation (→ 400) rather than an opaque 500.
 func resolveChapterFK(chapterIDs map[string]int64, clientID string) (*int64, error) {
 	if clientID == "" {
 		return nil, nil
 	}
 	id, ok := chapterIDs[clientID]
 	if !ok {
-		return nil, fmt.Errorf("unknown chapterClientId %q", clientID)
+		return nil, &myErrors.AppError{
+			Code:    "validation",
+			Message: fmt.Sprintf("unknown chapterClientId %q", clientID),
+			Field:   "chapterClientId",
+			Wrapped: myErrors.ErrValidation,
+		}
 	}
 	return &id, nil
 }

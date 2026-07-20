@@ -50,6 +50,36 @@ func TestQuota_ReturnsSnapshotForAuthenticatedUser(t *testing.T) {
 	}
 }
 
+// TestQuota_IncludesPlanBucket is a regression test for AI-5: plan_calls is a
+// real, enforced daily quota (default 5/day) that GET /ai/quota previously
+// omitted from the response entirely.
+func TestQuota_IncludesPlanBucket(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	testutil.SeedQuotaAt(t, pool, u.ID, "plan_calls", 2)
+
+	srv := newAIQuotaServer(t, pool)
+	tok := mintToken(t, u.ID, true, false)
+
+	req := httptest.NewRequest("GET", "/ai/quota", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body aipipeline.QuotaSnapshot
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Plan.Used != 2 || body.Plan.Limit != 5 {
+		t.Errorf("plan = (%d/%d), want (2/5)", body.Plan.Used, body.Plan.Limit)
+	}
+}
+
 func newAIQuotaServer(t *testing.T, pool *pgxpool.Pool) http.Handler {
 	t.Helper()
 	signer := jwtsigner.NewSigner("a-minimum-32-byte-secret-xxxxxxxxxx", "studbud-test", time.Hour)

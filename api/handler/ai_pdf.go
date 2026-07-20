@@ -79,7 +79,7 @@ func (h *AIHandler) runImageMode(ctx context.Context, w http.ResponseWriter, uid
 		httpx.WriteError(w, err)
 		return
 	}
-	rendered, err := h.prepareGeneration(ctx, in)
+	rendered, err := h.prepareGeneration(ctx, uid, in)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -114,7 +114,7 @@ func (h *AIHandler) runTextMode(ctx context.Context, w http.ResponseWriter, uid 
 		httpx.WriteError(w, err)
 		return
 	}
-	rendered, err := h.prepareGeneration(ctx, in)
+	rendered, err := h.prepareGeneration(ctx, uid, in)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -124,8 +124,8 @@ func (h *AIHandler) runTextMode(ctx context.Context, w http.ResponseWriter, uid 
 
 // prepareGeneration validates the subject + coverage, then renders the prompt.
 // Used by both image and text modes.
-func (h *AIHandler) prepareGeneration(ctx context.Context, in pdfGenInput) (string, error) {
-	subject, err := h.svc.LookupSubject(ctx, in.SubjectID)
+func (h *AIHandler) prepareGeneration(ctx context.Context, uid int64, in pdfGenInput) (string, error) {
+	subject, err := h.svc.LookupSubject(ctx, uid, in.SubjectID)
 	if err != nil {
 		return "", err
 	}
@@ -280,7 +280,7 @@ func parsePDFForm(r *http.Request) (pdfGenInput, error) {
 	if err != nil {
 		return pdfGenInput{}, err
 	}
-	return pdfGenInput{
+	in := pdfGenInput{
 		SubjectID:    parseInt64Form(r, "subject_id"),
 		ChapterID:    parseInt64Form(r, "chapter_id"),
 		Coverage:     orDefaultStr(r.FormValue("coverage"), "Balanced"),
@@ -289,7 +289,14 @@ func parsePDFForm(r *http.Request) (pdfGenInput, error) {
 		AutoChapters: r.FormValue("auto_chapters") == "true",
 		Mode:         orDefaultStr(r.FormValue("mode"), "image"),
 		PDFBytes:     bytesBuf,
-	}, nil
+	}
+	if in.SubjectID <= 0 {
+		return pdfGenInput{}, &myErrors.AppError{
+			Code: "validation", Message: "subject_id is required",
+			Wrapped: myErrors.ErrValidation, Field: "subject_id",
+		}
+	}
+	return in, nil
 }
 
 // readAllCapped slurps at most limit bytes; returns pdf_too_large past that.

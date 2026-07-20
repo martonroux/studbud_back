@@ -57,6 +57,43 @@ func TestGenerateFromPrompt_StreamsJobThenCardsThenDone(t *testing.T) {
 	}
 }
 
+// TestGenerateFromPrompt_CrossUserSubjectForbidden is a regression test for AI-1:
+// a caller with no relationship to the target subject must be rejected (403)
+// before the provider is ever invoked.
+func TestGenerateFromPrompt_CrossUserSubjectForbidden(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	owner := testutil.NewVerifiedUser(t, pool)
+	subj := testutil.NewSubject(t, pool, owner.ID)
+
+	stranger := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, stranger.ID)
+
+	cli := &testutil.FakeAIClient{
+		Chunks: []aiProvider.Chunk{
+			{Text: `{"items":[{"title":"t1","question":"q1","answer":"a1"}]}`, Done: true},
+		},
+	}
+	srv := newAIGenServer(t, pool, cli)
+	tok := mintToken(t, stranger.ID, true, false)
+
+	body, _ := json.Marshal(map[string]any{
+		"subject_id": subj.ID, "prompt": "Explain photosynthesis", "style": "standard",
+	})
+	req := httptest.NewRequest("POST", "/ai/flashcards/prompt", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+	}
+	if cli.Calls() != 0 {
+		t.Errorf("provider Calls() = %d, want 0 (must reject before calling the provider)", cli.Calls())
+	}
+}
+
 func newAIGenServer(t *testing.T, pool *pgxpool.Pool, cli aiProvider.Client) http.Handler {
 	t.Helper()
 	signer := jwtsigner.NewSigner("a-minimum-32-byte-secret-xxxxxxxxxx", "studbud-test", time.Hour)
