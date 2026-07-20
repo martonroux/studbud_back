@@ -107,6 +107,30 @@ func TestGenerateFromPDF_TextModeAcceptsLargePDF(t *testing.T) {
 	}
 }
 
+// TestGenerateFromPDF_MissingSubjectIDReturns400 is a regression test for
+// AI-6: a missing/zero subject_id previously defaulted to 0, which then
+// 404'd on the subject lookup instead of failing input validation first.
+func TestGenerateFromPDF_MissingSubjectIDReturns400(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+
+	srv := newAIPDFServer(t, pool, &testutil.FakeAIClient{})
+	tok := mintToken(t, u.ID, true, false)
+
+	form, ct := newPDFFormReader(t, 0, "image", []byte("%PDF-1.4 fake"))
+	req := httptest.NewRequest("POST", "/ai/flashcards/pdf", form)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestGenerateFromPDF_TextModeRejectsOver200Pages(t *testing.T) {
 	t.Skip("requires >200-page fixture; add api/handler/testdata/very_large.pdf to enable")
 }

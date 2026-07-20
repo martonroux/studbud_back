@@ -28,6 +28,25 @@ func TestRun_RejectsWhenNoAIAccess(t *testing.T) {
 	}
 }
 
+// TestRun_RejectsWhenSubjectNotAccessible is a regression test for AI-1: preflight
+// must reject generation against a subject the caller has no read access to,
+// even though they otherwise have AI access and quota.
+func TestRun_RejectsWhenSubjectNotAccessible(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	owner := testutil.NewVerifiedUser(t, pool)
+	subj := testutil.NewSubject(t, pool, owner.ID)
+
+	stranger := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, stranger.ID)
+
+	svc := newPipelineSvc(pool, &testutil.FakeAIClient{})
+	_, _, err := svc.RunStructuredGeneration(context.Background(), newPromptReq(stranger.ID, subj.ID))
+	if !errors.Is(err, myErrors.ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
+	}
+}
+
 func TestRun_RejectsWhenQuotaExhausted(t *testing.T) {
 	pool := testutil.OpenTestDB(t)
 	testutil.Reset(t, pool)

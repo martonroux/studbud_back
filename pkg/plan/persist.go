@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -73,15 +74,16 @@ func (s *Service) loadProgressByDate(ctx context.Context, userID int64) (map[str
 	defer rows.Close()
 	out := map[string]map[int64]bool{}
 	for rows.Next() {
-		var date string
+		var date time.Time
 		var fcID int64
 		if err := rows.Scan(&date, &fcID); err != nil {
 			return nil, fmt.Errorf("scan progress:\n%w", err)
 		}
-		if out[date] == nil {
-			out[date] = map[int64]bool{}
+		key := date.Format(dateLayout)
+		if out[key] == nil {
+			out[key] = map[int64]bool{}
 		}
-		out[date][fcID] = true
+		out[key][fcID] = true
 	}
 	return out, rows.Err()
 }

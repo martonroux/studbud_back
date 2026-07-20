@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"studbud/backend/internal/aiProvider"
+	"studbud/backend/internal/myErrors"
 )
 
 // CheckInput describes one AI-check request.
@@ -39,7 +40,7 @@ type CheckOutput struct {
 
 // CheckFlashcard runs a non-streaming AI check and returns the parsed result.
 func (s *Service) CheckFlashcard(ctx context.Context, in CheckInput) (*CheckOutput, error) {
-	fc, err := s.loadFlashcard(ctx, in.FlashcardID)
+	fc, err := s.loadFlashcard(ctx, in.UserID, in.FlashcardID)
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +171,10 @@ type flashcardRow struct {
 	SubjectName string // SubjectName is the joined subject name
 }
 
-// loadFlashcard reads the target flashcard plus its subject name.
-func (s *Service) loadFlashcard(ctx context.Context, id int64) (*flashcardRow, error) {
+// loadFlashcard reads the target flashcard plus its subject name, after
+// verifying uid has at least read access to the owning subject. Strangers
+// get ErrForbidden.
+func (s *Service) loadFlashcard(ctx context.Context, uid, id int64) (*flashcardRow, error) {
 	var r flashcardRow
 	err := s.db.QueryRow(ctx, `
         SELECT f.title, f.question, f.answer, f.subject_id, s.name
@@ -180,9 +183,16 @@ func (s *Service) loadFlashcard(ctx context.Context, id int64) (*flashcardRow, e
     `, id).Scan(&r.Title, &r.Question, &r.Answer, &r.SubjectID, &r.SubjectName)
 	if err != nil {
 		if isNoRows(err) {
-			return nil, fmt.Errorf("flashcard %d: not found", id)
+			return nil, myErrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("load flashcard:\n%w", err)
+	}
+	lvl, err := s.access.SubjectLevel(ctx, uid, r.SubjectID)
+	if err != nil {
+		return nil, err
+	}
+	if !lvl.CanRead() {
+		return nil, myErrors.ErrForbidden
 	}
 	return &r, nil
 }
