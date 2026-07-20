@@ -148,6 +148,7 @@ func registerVerifiedRoutes(mux *http.ServeMux, d *deps, av func(http.HandlerFun
 	mux.Handle("POST /collaborator-remove", av(collabH.RemoveCollaborator))
 	mux.Handle("POST /collaboration-invites", av(collabH.CreateInvite))
 	mux.Handle("POST /collaboration-invite-redeem", av(collabH.RedeemInvite))
+	mux.Handle("POST /collaboration-invite-revoke", av(collabH.RevokeInvite))
 	mux.Handle("POST /exams", av(examH.Create))
 	mux.Handle("GET /exams", av(examH.List))
 	mux.Handle("GET /exams/{id}", av(examH.Get))

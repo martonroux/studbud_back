@@ -112,3 +112,18 @@ func (h *CollaborationHandler) RedeemInvite(w http.ResponseWriter, r *http.Reque
 	}
 	httpx.WriteJSON(w, http.StatusOK, c)
 }
+
+// RevokeInvite handles POST /collaboration-invite-revoke?token=...
+func (h *CollaborationHandler) RevokeInvite(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		httpx.WriteError(w, myErrors.ErrInvalidInput)
+		return
+	}
+	if err := h.svc.RevokeInvite(r.Context(), uid, token); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

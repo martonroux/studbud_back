@@ -53,6 +53,9 @@ func (s *Service) Create(ctx context.Context, uid int64, in CreateInput) (*Subje
 }
 
 // Get fetches a subject if the user can read it.
+// Both "subject does not exist" and "subject exists but is not visible to
+// uid" return ErrNotFound — never ErrForbidden — so an unrelated caller
+// cannot use the status code to learn whether a private subject ID exists.
 func (s *Service) Get(ctx context.Context, uid, subjectID int64) (*Subject, error) {
 	sub, err := s.load(ctx, subjectID)
 	if err != nil {
@@ -63,7 +66,7 @@ func (s *Service) Get(ctx context.Context, uid, subjectID int64) (*Subject, erro
 		return nil, err
 	}
 	if level == access.LevelNone {
-		return nil, myErrors.ErrForbidden
+		return nil, myErrors.ErrNotFound
 	}
 	return sub, nil
 }
