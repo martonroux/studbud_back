@@ -89,6 +89,9 @@ func (h *FriendshipHandler) ListFriends(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteError(w, err)
 		return
 	}
+	if list == nil {
+		list = []friendship.Friendship{}
+	}
 	httpx.WriteJSON(w, http.StatusOK, list)
 }
 
@@ -99,6 +102,9 @@ func (h *FriendshipHandler) ListPending(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
+	}
+	if list == nil {
+		list = []friendship.Friendship{}
 	}
 	httpx.WriteJSON(w, http.StatusOK, list)
 }
