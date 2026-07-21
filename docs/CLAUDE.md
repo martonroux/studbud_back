@@ -2,6 +2,8 @@
 
 This file provides global guidance to Claude Code when working on the StudBud backend.
 
+> **Naming (2026-07-21, STU-34):** StudBud has been renamed **Studdle**. Both names refer to this exact codebase — there is no separate Studdle app. (A Next.js "Studdle" prototype briefly existed in the Paperclip agent workspace; it is deprecated, and all product development continues here.) Issues, docs, and code may use either name until the rebrand lands.
+
 ## Go Coding Standards
 
 ### KISS Principles (CRUCIAL)
