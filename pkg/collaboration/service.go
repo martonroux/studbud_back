@@ -111,25 +111,83 @@ func (s *Service) CreateInvite(ctx context.Context, ownerID int64, in CreateInvi
 }
 
 // RedeemInvite consumes an invite token and creates (or upgrades) a collaborator row for uid.
-// Expired or unknown tokens return ErrInvalidInput / ErrNotFound respectively.
+// Unknown or revoked tokens return ErrNotFound; expired tokens return ErrInvalidInput.
+// A redeemer who already owns the subject is rejected with ErrConflict instead
+// of gaining a pointless collaborator row — owners already have full access.
 func (s *Service) RedeemInvite(ctx context.Context, uid int64, token string) (*Collaborator, error) {
-	var subjectID int64
-	var role string
-	var expiresAt *time.Time
-	err := s.db.QueryRow(ctx, `
-		SELECT subject_id, role, expires_at
-		FROM invite_links WHERE token=$1
-	`, token).Scan(&subjectID, &role, &expiresAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, myErrors.ErrNotFound
-	}
+	subjectID, role, err := s.loadRedeemableInvite(ctx, token)
 	if err != nil {
-		return nil, fmt.Errorf("load invite:\n%w", err)
+		return nil, err
 	}
-	if expiresAt != nil && time.Now().After(*expiresAt) {
-		return nil, myErrors.ErrInvalidInput
+	isOwner, err := s.isSubjectOwner(ctx, uid, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	if isOwner {
+		return nil, myErrors.ErrConflict
 	}
 	return s.upsertCollaborator(ctx, subjectID, uid, role)
+}
+
+// RevokeInvite marks an invite link as revoked so it can no longer be
+// redeemed. Only the subject owner may revoke their own invite links.
+func (s *Service) RevokeInvite(ctx context.Context, ownerID int64, token string) error {
+	subjectID, err := s.inviteSubject(ctx, token)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureOwner(ctx, ownerID, subjectID); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE invite_links SET revoked_at = now() WHERE token = $1`, token); err != nil {
+		return fmt.Errorf("revoke invite:\n%w", err)
+	}
+	return nil
+}
+
+// loadRedeemableInvite loads an invite token's subject and role, validating
+// that it is neither unknown, revoked (both ErrNotFound), nor expired (ErrInvalidInput).
+func (s *Service) loadRedeemableInvite(ctx context.Context, token string) (subjectID int64, role string, err error) {
+	var expiresAt, revokedAt *time.Time
+	err = s.db.QueryRow(ctx, `
+		SELECT subject_id, role, expires_at, revoked_at
+		FROM invite_links WHERE token=$1
+	`, token).Scan(&subjectID, &role, &expiresAt, &revokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", myErrors.ErrNotFound
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("load invite:\n%w", err)
+	}
+	if revokedAt != nil {
+		return 0, "", myErrors.ErrNotFound
+	}
+	if expiresAt != nil && time.Now().After(*expiresAt) {
+		return 0, "", myErrors.ErrInvalidInput
+	}
+	return subjectID, role, nil
+}
+
+// inviteSubject returns the subject_id an invite token belongs to, or ErrNotFound.
+func (s *Service) inviteSubject(ctx context.Context, token string) (int64, error) {
+	var subjectID int64
+	err := s.db.QueryRow(ctx, `SELECT subject_id FROM invite_links WHERE token=$1`, token).Scan(&subjectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, myErrors.ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load invite subject:\n%w", err)
+	}
+	return subjectID, nil
+}
+
+// isSubjectOwner reports whether uid holds owner-level access on subjectID.
+func (s *Service) isSubjectOwner(ctx context.Context, uid, subjectID int64) (bool, error) {
+	level, err := s.access.SubjectLevel(ctx, uid, subjectID)
+	if err != nil {
+		return false, err
+	}
+	return level.CanManage(), nil
 }
 
 // insertInvite persists a freshly minted invite link and returns the row.

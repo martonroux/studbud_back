@@ -40,30 +40,30 @@ import (
 
 // deps bundles every constructed service and shared resource for the router.
 type deps struct {
-	cfg          *config.Config             // cfg is the loaded runtime configuration
-	db           *pgxpool.Pool              // db is the shared PostgreSQL connection pool
-	signer       *jwtsigner.Signer          // signer issues and verifies JWTs
-	scheduler    *cron.Scheduler            // scheduler drives periodic background jobs
-	worker       *keywordWorker.Worker      // worker processes keyword extraction tasks
-	access       *access.Service            // access gates subject/chapter entitlements
-	user         *user.Service              // user handles registration, login, and profiles
-	emailVer     *emailverification.Service // emailVer manages email verification flows
-	image        *image.Service             // image manages uploads and retrieval
-	subject      *subject.Service           // subject owns study subject CRUD
-	chapter      *chapter.Service           // chapter owns chapter CRUD within subjects
-	flashcard    *flashcard.Service         // flashcard owns card CRUD within chapters
-	search       *search.Service            // search provides full-text search
-	friendship   *friendship.Service        // friendship manages friend requests and lists
-	subjectSub   *subjectsub.Service        // subjectSub handles subject subscriptions
-	collab       *collaboration.Service     // collab manages collaborative editing sessions
-	preferences  *preferences.Service       // preferences stores per-user settings
-	gamification *gamification.Service      // gamification tracks badges and XP
-	exam         *exam.Service              // exam owns exam CRUD
-	ai           *aipipeline.Service        // ai provides AI pipeline stubs
-	quiz         *quiz.Service              // quiz provides quiz generation stubs
-	plan         *pkgplan.Service           // plan provides study plan stubs
-	duel         *duel.Service              // duel handles real-time duel sessions
-	billing      *pkgbilling.Service        // billing manages subscription and payments
+	cfg          *config.Config               // cfg is the loaded runtime configuration
+	db           *pgxpool.Pool                // db is the shared PostgreSQL connection pool
+	signer       *jwtsigner.Signer            // signer issues and verifies JWTs
+	scheduler    *cron.Scheduler              // scheduler drives periodic background jobs
+	worker       *keywordWorker.Worker        // worker processes keyword extraction tasks
+	access       *access.Service              // access gates subject/chapter entitlements
+	user         *user.Service                // user handles registration, login, and profiles
+	emailVer     *emailverification.Service   // emailVer manages email verification flows
+	image        *image.Service               // image manages uploads and retrieval
+	subject      *subject.Service             // subject owns study subject CRUD
+	chapter      *chapter.Service             // chapter owns chapter CRUD within subjects
+	flashcard    *flashcard.Service           // flashcard owns card CRUD within chapters
+	search       *search.Service              // search provides full-text search
+	friendship   *friendship.Service          // friendship manages friend requests and lists
+	subjectSub   *subjectsub.Service          // subjectSub handles subject subscriptions
+	collab       *collaboration.Service       // collab manages collaborative editing sessions
+	preferences  *preferences.Service         // preferences stores per-user settings
+	gamification *gamification.Service        // gamification tracks badges and XP
+	exam         *exam.Service                // exam owns exam CRUD
+	ai           *aipipeline.Service          // ai provides AI pipeline stubs
+	quiz         *quiz.Service                // quiz provides quiz generation stubs
+	plan         *pkgplan.Service             // plan provides study plan stubs
+	duel         *duel.Service                // duel handles real-time duel sessions
+	billing      *pkgbilling.Service          // billing manages subscription and payments
 	prices       billingadapter.PriceProvider // prices fetches live Stripe price data
 }
 
@@ -203,7 +203,7 @@ func buildDomainServices(cfg *config.Config, pool *pgxpool.Pool, inf infra) doma
 		subjectSub:   subjectsub.NewService(pool, acc),
 		collab:       collaboration.NewService(pool, acc),
 		preferences:  preferences.NewService(pool),
-		gamification: gamification.NewService(pool),
+		gamification: gamification.NewService(pool, acc),
 		exam:         exam.NewService(pool, acc),
 	}
 }

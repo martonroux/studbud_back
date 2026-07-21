@@ -42,7 +42,7 @@ func (h *AIHandler) GenerateFromPrompt(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	subject, err := h.svc.LookupSubject(r.Context(), in.SubjectID)
+	subject, err := h.svc.LookupSubject(r.Context(), uid, in.SubjectID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -103,7 +103,6 @@ func renderPromptGenPromptExported(in promptGenInput, subjectName string) (strin
 		AutoChapters: in.AutoChapters && in.ChapterID == 0,
 	})
 }
-
 
 // runGeneration invokes the pipeline and writes SSE events per emitted chunk.
 // First event is always job; then card / chapter / progress / terminal done / error.

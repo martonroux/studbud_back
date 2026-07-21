@@ -834,6 +834,19 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Collaborator' }
 
+  /collaboration-invite-revoke:
+    post:
+      tags: [Collaboration]
+      summary: Revoke invite link (verified, owner only)
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Invite revoked
+
   /preferences:
     get:
       tags: [Preferences]

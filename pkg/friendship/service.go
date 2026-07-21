@@ -23,11 +23,62 @@ func NewService(db *pgxpool.Pool) *Service {
 }
 
 // Request creates a pending friend request from senderID to receiverID.
-// It rejects self-friend requests and maps unique-violation to ErrConflict.
+// It rejects self-friend requests and requests between users who are already
+// friends (in either direction). If a prior request from senderID to
+// receiverID was declined, that row is reopened to pending instead of
+// attempting a fresh INSERT that would collide with the unique index.
 func (s *Service) Request(ctx context.Context, senderID, receiverID int64) (*Friendship, error) {
 	if senderID == receiverID {
 		return nil, myErrors.ErrInvalidInput
 	}
+	if already, err := s.alreadyFriends(ctx, senderID, receiverID); err != nil {
+		return nil, err
+	} else if already {
+		return nil, myErrors.ErrConflict
+	}
+	if reopened, err := s.reopenDeclined(ctx, senderID, receiverID); err != nil || reopened != nil {
+		return reopened, err
+	}
+	return s.insertRequest(ctx, senderID, receiverID)
+}
+
+// alreadyFriends reports whether a and b have an accepted friendship, in either direction.
+func (s *Service) alreadyFriends(ctx context.Context, a, b int64) (bool, error) {
+	var n int
+	err := s.db.QueryRow(ctx, `
+		SELECT count(*) FROM friendships
+		WHERE status='accepted' AND (
+		  (sender_id=$1 AND receiver_id=$2) OR (sender_id=$2 AND receiver_id=$1)
+		)
+	`, a, b).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("check existing friendship:\n%w", err)
+	}
+	return n > 0, nil
+}
+
+// reopenDeclined resets a previously declined request from senderID to receiverID
+// back to pending. Returns (nil, nil) when no declined row exists to reopen.
+func (s *Service) reopenDeclined(ctx context.Context, senderID, receiverID int64) (*Friendship, error) {
+	var f Friendship
+	err := s.db.QueryRow(ctx, `
+		UPDATE friendships SET status='pending', created_at=now(), updated_at=now()
+		WHERE sender_id=$1 AND receiver_id=$2 AND status='declined'
+		RETURNING id, sender_id, receiver_id, status, created_at, updated_at
+	`, senderID, receiverID).Scan(
+		&f.ID, &f.SenderID, &f.ReceiverID, &f.Status, &f.CreatedAt, &f.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reopen declined friendship:\n%w", err)
+	}
+	return &f, nil
+}
+
+// insertRequest performs the fresh INSERT for a brand-new friend request.
+func (s *Service) insertRequest(ctx context.Context, senderID, receiverID int64) (*Friendship, error) {
 	var f Friendship
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO friendships (sender_id, receiver_id, status)

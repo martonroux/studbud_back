@@ -78,9 +78,10 @@ func filterCandidatesByID(cs []Candidate, keepIDs []int64) []Candidate {
 }
 
 // resolveSubjectName looks up the subject name for the given ID, returning a
-// validation error if the subject was deleted mid-flight.
-func (s *Service) resolveSubjectName(ctx context.Context, subjectID int64) (string, error) {
-	meta, err := s.ai.LookupSubject(ctx, subjectID)
+// validation error if the subject was deleted mid-flight. uid must already
+// have read access to subjectID (verified by LookupSubject itself).
+func (s *Service) resolveSubjectName(ctx context.Context, uid, subjectID int64) (string, error) {
+	meta, err := s.ai.LookupSubject(ctx, uid, subjectID)
 	if err != nil {
 		if errors.Is(err, myErrors.ErrNotFound) {
 			return "", &myErrors.AppError{Code: "subject_missing", Message: "exam subject was removed", Wrapped: myErrors.ErrNotFound}

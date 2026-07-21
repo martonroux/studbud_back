@@ -41,6 +41,7 @@ type QuotaSnapshot struct {
 	Prompt   QuotaBucket `json:"prompt"`   // Prompt is the prompt-mode bucket
 	PDF      PDFBucket   `json:"pdf"`      // PDF is the PDF-mode bucket
 	Check    QuotaBucket `json:"check"`    // Check is the AI-check bucket
+	Plan     QuotaBucket `json:"plan"`     // Plan is the revision-plan generation bucket
 }
 
 // CheckQuota asserts the user has budget left for the given feature.
@@ -201,6 +202,7 @@ func buildSnapshot(row quotaRow, lim QuotaLimits, aiAccess bool) *QuotaSnapshot 
 			ResetAt: reset,
 		},
 		Check: QuotaBucket{Used: row.CheckCalls, Limit: lim.CheckCalls, ResetAt: reset},
+		Plan:  QuotaBucket{Used: row.PlanCalls, Limit: lim.PlanCalls, ResetAt: reset},
 	}
 }
 

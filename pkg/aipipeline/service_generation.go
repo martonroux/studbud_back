@@ -29,15 +29,34 @@ func (s *Service) RunStructuredGeneration(
 	return out, jobID, nil
 }
 
-// preflight runs entitlement + quota + concurrent-cap checks in order.
+// preflight runs entitlement + subject-access + quota + concurrent-cap checks in order.
 func (s *Service) preflight(ctx context.Context, req AIRequest) error {
 	if err := s.checkEntitlement(ctx, req.UserID); err != nil {
+		return err
+	}
+	if err := s.checkSubjectAccess(ctx, req.UserID, req.SubjectID); err != nil {
 		return err
 	}
 	if err := s.CheckQuota(ctx, req.UserID, req.Feature, req.PDFPages); err != nil {
 		return err
 	}
 	return s.checkConcurrency(ctx, req)
+}
+
+// checkSubjectAccess rejects requests targeting a subject the caller can't
+// read. SubjectID <= 0 is treated as "not subject-scoped" and always allowed.
+func (s *Service) checkSubjectAccess(ctx context.Context, uid, subjectID int64) error {
+	if subjectID <= 0 {
+		return nil
+	}
+	lvl, err := s.access.SubjectLevel(ctx, uid, subjectID)
+	if err != nil {
+		return err
+	}
+	if !lvl.CanRead() {
+		return myErrors.ErrForbidden
+	}
+	return nil
 }
 
 // checkEntitlement fails fast when the user lacks AI access.

@@ -102,7 +102,7 @@ func (s *Service) preparePools(ctx context.Context, userID int64, exm *exam.Exam
 		return primary, nil, nil
 	}
 	emit(out, Event{Phase: PhaseRanking, Detail: fmt.Sprintf("%d candidates", len(rawCandidates))})
-	ranked, err := s.rankCrossSubjects(ctx, exm, rawCandidates)
+	ranked, err := s.rankCrossSubjects(ctx, userID, exm, rawCandidates)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -121,7 +121,7 @@ func (s *Service) runPlanningPhase(
 	if err != nil {
 		return nil, err
 	}
-	prompt, err := s.renderPlanPrompt(ctx, exm, primary, candidates, stats, len(images) > 0)
+	prompt, err := s.renderPlanPrompt(ctx, userID, exm, primary, candidates, stats, len(images) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -180,10 +180,10 @@ func collectDayItems(ctx context.Context, chunks <-chan aipipeline.AIChunk) ([]D
 
 // renderPlanPrompt stitches together the AI inputs for FeatureGenerateRevisionPlan.
 func (s *Service) renderPlanPrompt(
-	ctx context.Context, exm *exam.Exam,
+	ctx context.Context, uid int64, exm *exam.Exam,
 	primary []PrimaryCard, candidates []Candidate, stats stateCounts, hasAnnales bool,
 ) (string, error) {
-	subjectName, err := s.resolveSubjectName(ctx, exm.SubjectID)
+	subjectName, err := s.resolveSubjectName(ctx, uid, exm.SubjectID)
 	if err != nil {
 		return "", err
 	}
@@ -205,8 +205,8 @@ func (s *Service) renderPlanPrompt(
 // rankCrossSubjects asks the AI to keep at most crossSubjectKeepLimit relevant candidates.
 // On any AI error or empty selection the function falls back to returning the
 // shortlist truncated to crossSubjectKeepLimit — degraded but functional.
-func (s *Service) rankCrossSubjects(ctx context.Context, exm *exam.Exam, candidates []Candidate) ([]Candidate, error) {
-	subjectName, err := s.resolveSubjectName(ctx, exm.SubjectID)
+func (s *Service) rankCrossSubjects(ctx context.Context, uid int64, exm *exam.Exam, candidates []Candidate) ([]Candidate, error) {
+	subjectName, err := s.resolveSubjectName(ctx, uid, exm.SubjectID)
 	if err != nil {
 		return nil, err
 	}
