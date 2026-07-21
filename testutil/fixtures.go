@@ -45,6 +45,7 @@ func NewVerifiedUserNamed(t *testing.T, pool *pgxpool.Pool, username string) *Us
 	return insertUser(t, pool, username, true)
 }
 
+// insertUser inserts a user row with the given username/verified state and returns the fixture.
 func insertUser(t *testing.T, pool *pgxpool.Pool, username string, verified bool) *UserFixture {
 	t.Helper()
 	email := username + "@example.com"
@@ -83,6 +84,7 @@ func NewSubjectNamed(t *testing.T, pool *pgxpool.Pool, ownerID int64, name, visi
 	return insertSubject(t, pool, ownerID, name, visibility)
 }
 
+// insertSubject inserts a subject row with the given name/visibility and returns the fixture.
 func insertSubject(t *testing.T, pool *pgxpool.Pool, ownerID int64, name, visibility string) *SubjectFixture {
 	t.Helper()
 	var id int64
@@ -188,6 +190,7 @@ func ExhaustQuota(t *testing.T, pool *pgxpool.Pool, uid int64, column string) {
 	}
 }
 
+// isKnownQuotaColumn reports whether col is a valid ai_quota_daily column name.
 func isKnownQuotaColumn(col string) bool {
 	switch col {
 	case "prompt_calls", "pdf_calls", "pdf_pages", "check_calls",
