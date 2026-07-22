@@ -30,8 +30,30 @@ func (c *StripeClient) ListSubscriptionsByCustomer(ctx context.Context, customer
 
 	iter := stripesubscription.List(params)
 	var subs []Subscription
+	var pageEnds map[string]int64
+	var pageList *stripe.SubscriptionList
 	for iter.Next() {
-		subs = append(subs, *projectSubscription(iter.Subscription()))
+		s := iter.Subscription()
+
+		// stripe-go v76's list iterator only ever calls SetLastResponse on
+		// the page container (see itemLevelCurrentPeriodEndsByID), never on
+		// the individual *stripe.Subscription values it yields, so
+		// projectSubscription's per-subscription raw-JSON fallback can't see
+		// item-level current_period_end here. Rebuild the page-level lookup
+		// whenever the container changes (i.e. a new page was fetched).
+		if list := iter.SubscriptionList(); list != pageList {
+			pageList = list
+			pageEnds = itemLevelCurrentPeriodEndsByID(list)
+		}
+
+		sub := projectSubscription(s)
+		if sub.CurrentPeriodEnd == nil {
+			if end, ok := pageEnds[s.ID]; ok && end != 0 {
+				t := time.Unix(end, 0)
+				sub.CurrentPeriodEnd = &t
+			}
+		}
+		subs = append(subs, *sub)
 	}
 	if err := iter.Err(); err != nil {
 		return nil, fmt.Errorf("stripe list subscriptions:\n%w", err)
@@ -104,4 +126,39 @@ func itemLevelCurrentPeriodEnd(s *stripe.Subscription) int64 {
 		return 0
 	}
 	return raw.Items.Data[0].CurrentPeriodEnd
+}
+
+// itemLevelCurrentPeriodEndsByID extracts item-level current_period_end for
+// every subscription on a list page, keyed by subscription ID. Confirmed
+// against stripe-go v76's source (stripe.go's Do): for a list call, Call/Do
+// invokes SetLastResponse exactly once, on the *stripe.SubscriptionList
+// container passed to CallRaw — never on the individual *stripe.Subscription
+// values decoded into its Data slice. So those values' own LastResponse is
+// always nil, and itemLevelCurrentPeriodEnd's fallback never fires for them.
+// This re-parses the container's raw JSON instead, which does carry it.
+func itemLevelCurrentPeriodEndsByID(list *stripe.SubscriptionList) map[string]int64 {
+	ends := make(map[string]int64)
+	if list == nil || list.LastResponse == nil || len(list.LastResponse.RawJSON) == 0 {
+		return ends
+	}
+
+	var raw struct {
+		Data []struct {
+			ID    string `json:"id"`
+			Items struct {
+				Data []struct {
+					CurrentPeriodEnd int64 `json:"current_period_end"`
+				} `json:"data"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(list.LastResponse.RawJSON, &raw); err != nil {
+		return ends
+	}
+	for _, item := range raw.Data {
+		if len(item.Items.Data) > 0 {
+			ends[item.ID] = item.Items.Data[0].CurrentPeriodEnd
+		}
+	}
+	return ends
 }

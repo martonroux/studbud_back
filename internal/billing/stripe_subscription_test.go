@@ -1,7 +1,10 @@
 package billing
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 
@@ -113,4 +116,73 @@ func TestProjectSubscription_NoCurrentPeriodEndAnywhere(t *testing.T) {
 
 func jsonInt(v int64) string {
 	return strconv.FormatInt(v, 10)
+}
+
+// STU-37 follow-up: a hand-built *stripe.Subscription with LastResponse set
+// directly (as above) simulates RetrieveSubscription's single-object Get
+// path, but ListSubscriptionsByCustomer goes through stripe-go's list
+// iterator instead. In v76, SetLastResponse is only ever called on the page
+// *container*, never on the individual subscriptions decoded into its Data
+// slice, so a subscription built that way never actually exercises the list
+// path's behavior. This test drives the real HTTP + iterator plumbing
+// (a fake Stripe backend serving a fixture shaped like the real list
+// response) so it would have caught that gap.
+func TestListSubscriptionsByCustomer_FallsBackToItemLevelCurrentPeriodEnd(t *testing.T) {
+	const itemPeriodEnd = int64(1785000000)
+	body := `{
+		"object": "list",
+		"url": "/v1/subscriptions",
+		"has_more": false,
+		"data": [
+			{
+				"id": "sub_list123",
+				"object": "subscription",
+				"customer": "cus_test123",
+				"status": "active",
+				"current_period_end": null,
+				"cancel_at_period_end": false,
+				"livemode": false,
+				"items": {
+					"object": "list",
+					"data": [
+						{
+							"id": "si_test123",
+							"object": "subscription_item",
+							"current_period_end": ` + jsonInt(itemPeriodEnd) + `,
+							"price": {"id": "price_M", "object": "price"}
+						}
+					]
+				}
+			}
+		]
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	stripe.SetBackend(stripe.APIBackend, stripe.GetBackendWithConfig(stripe.APIBackend, &stripe.BackendConfig{
+		URL: stripe.String(srv.URL),
+	}))
+	defer stripe.SetBackend(stripe.APIBackend, nil)
+	prevKey := stripe.Key
+	stripe.Key = "sk_test_dummy"
+	defer func() { stripe.Key = prevKey }()
+
+	c := &StripeClient{}
+	subs, err := c.ListSubscriptionsByCustomer(context.Background(), "cus_test123", 10)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(subs) != 1 {
+		t.Fatalf("got %d subs, want 1", len(subs))
+	}
+	if subs[0].CurrentPeriodEnd == nil {
+		t.Fatal("CurrentPeriodEnd = nil, want populated from item-level fallback via the list path")
+	}
+	if got, want := subs[0].CurrentPeriodEnd.Unix(), itemPeriodEnd; got != want {
+		t.Fatalf("CurrentPeriodEnd = %d, want %d", got, want)
+	}
 }
