@@ -32,15 +32,6 @@ CREATE INDEX IF NOT EXISTS idx_duels_invitee ON duels(invitee_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_duels_one_waiting_per_challenger
   ON duels(challenger_id) WHERE status = 'waiting';
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quizzes_duel_id_fkey') THEN
-    ALTER TABLE quizzes
-      ADD CONSTRAINT quizzes_duel_id_fkey
-      FOREIGN KEY (duel_id) REFERENCES duels(id) ON DELETE SET NULL;
-  END IF;
-END $$;
-
 CREATE TABLE IF NOT EXISTS duel_invite_tokens (
     id          BIGSERIAL PRIMARY KEY,
     duel_id     BIGINT NOT NULL REFERENCES duels(id) ON DELETE CASCADE,

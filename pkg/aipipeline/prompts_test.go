@@ -131,3 +131,70 @@ func TestRenderRevisionPlan_IncludesAllSections(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderGenerateQuiz_IncludesAllInputs(t *testing.T) {
+	body, err := RenderGenerateQuiz(QuizGenValues{
+		SubjectName: "Cellular Biology",
+		Kind:        "specific",
+		Size:        10,
+		Types:       []string{"multi_choice", "true_false"},
+		Cards: []QuizSourceCard{
+			{ID: 42, Title: "Mitochondria", Question: "What is the powerhouse?", Answer: "Mitochondrion"},
+			{ID: 43, Title: "Ribosomes", Question: "What synthesises protein?", Answer: "Ribosomes"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{
+		"Cellular Biology",
+		"multi_choice",
+		"true_false",
+		"Mitochondria",
+		"Ribosomes",
+		"10 quiz",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered prompt missing %q\n---\n%s\n---", want, body)
+		}
+	}
+}
+
+func TestRenderGenerateQuiz_GlobalKind_OmitsCards(t *testing.T) {
+	body, err := RenderGenerateQuiz(QuizGenValues{
+		SubjectName: "World History",
+		Kind:        "global",
+		Size:        5,
+		Types:       []string{"multi_choice"},
+		Cards:       nil,
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(body, "global") {
+		t.Fatalf("missing 'global' marker; got:\n%s", body)
+	}
+	if strings.Contains(body, "SOURCE CARDS") {
+		t.Fatalf("global kind should not list SOURCE CARDS; got:\n%s", body)
+	}
+}
+
+// The structured-output parser (consumeStream) extracts elements from a top-level
+// "items" array. The prompt must therefore instruct the model to emit
+// {"items": [...]}, not a bare array — otherwise the parser sees zero items and
+// drainQuestions raises ErrAIProvider("AI returned 0 items, want N").
+func TestRenderGenerateQuiz_InstructsItemsWrapper(t *testing.T) {
+	body, err := RenderGenerateQuiz(QuizGenValues{
+		SubjectName: "Bio",
+		Kind:        "specific",
+		Size:        5,
+		Types:       []string{"multi_choice"},
+		Cards:       []QuizSourceCard{{ID: 1, Title: "t", Question: "q", Answer: "a"}},
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(body, `"items"`) {
+		t.Fatalf(`prompt must instruct {"items": [...]} wrapper, got:\n%s`, body)
+	}
+}

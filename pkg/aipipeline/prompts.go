@@ -198,3 +198,26 @@ type RevisionPlanValues struct {
 func RenderRevisionPlan(v RevisionPlanValues) (string, error) {
 	return renderTemplate("prompts/revision_plan.tmpl", v)
 }
+
+// QuizSourceCard is one user-owned flashcard handed to the quiz generator
+// when the quiz kind is "specific". Empty for "global" quizzes.
+type QuizSourceCard struct {
+	ID       int64  // ID is the flashcard primary key
+	Title    string // Title is the flashcard title
+	Question string // Question is the flashcard question body
+	Answer   string // Answer is the flashcard correct answer
+}
+
+// QuizGenValues is the template input for the generate-quiz prompt.
+type QuizGenValues struct {
+	SubjectName string           // SubjectName labels the subject for the prompt
+	Kind        string           // Kind is "specific" or "global"
+	Size        int              // Size is the requested number of questions
+	Types       []string         // Types lists allowed question types (subset of multi_choice|true_false|fill_blank)
+	Cards       []QuizSourceCard // Cards is the source pool for kind="specific"; nil for "global"
+}
+
+// RenderGenerateQuiz returns the rendered prompt body for FeatureGenerateQuiz.
+func RenderGenerateQuiz(v QuizGenValues) (string, error) {
+	return renderTemplate("prompts/generate_quiz.tmpl", v)
+}

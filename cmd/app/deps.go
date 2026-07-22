@@ -223,7 +223,7 @@ func buildStubServices(cfg *config.Config, pool *pgxpool.Pool, inf infra, dom do
 	ai := aipipeline.NewService(pool, inf.aiClient, dom.access, aipipeline.DefaultQuotaLimits(), cfg.AIModel)
 	return stubSvcs{
 		ai:   ai,
-		quiz: quiz.NewService(pool),
+		quiz: quiz.NewService(pool, ai),
 		plan: pkgplan.NewService(pool, ai, dom.exam, dom.image, dom.access, cfg.AIModel),
 		duel: duel.NewService(pool, inf.hub),
 		billing: pkgbilling.NewService(pool, inf.billing, pkgbilling.PriceMap{
