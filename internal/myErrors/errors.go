@@ -69,6 +69,10 @@ var ErrNotImplemented = errors.New("not implemented")
 // ErrRateLimited indicates the caller exceeded a per-user request rate limit.
 var ErrRateLimited = errors.New("rate limited")
 
+// ErrEmptyCardPool indicates a kind=specific quiz request resolved zero
+// flashcards for the requested subject/chapter/cardFilter scope.
+var ErrEmptyCardPool = errors.New("empty card pool")
+
 // AppError carries contextual error information alongside a sentinel.
 // Use when the caller needs structured details (e.g., which field failed).
 type AppError struct {

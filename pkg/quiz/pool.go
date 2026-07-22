@@ -35,10 +35,19 @@ func (s *Service) resolveCardPool(ctx context.Context, req GenerateRequest) ([]a
 	return cards, ids, nil
 }
 
+// badOkPredicate and duePredicate are the canonical SQL fragments for the
+// bad_ok / due card filters. Shared between poolQuery (single-filter row
+// selection) and the card-counts aggregation query (counts every filter at
+// once) so the semantics never drift between the two call sites.
+// last_result encoding: -1=new, 0=bad, 1=ok, 2=good.
+// due_at is nullable for new cards, so the due predicate requires IS NOT NULL.
+const (
+	badOkPredicate = `f.last_result IN (0, 1)`
+	duePredicate   = `f.due_at IS NOT NULL AND f.due_at <= now()`
+)
+
 // poolQuery returns the SELECT for the requested filter. Subject scope is enforced
 // via flashcards.subject_id directly (no join needed); chapter scope optional.
-// last_result encoding: -1=new, 0=bad, 1=ok, 2=good.
-// due_at is nullable for new cards, so FilterDue requires IS NOT NULL.
 func poolQuery(req GenerateRequest) string {
 	q := `
 SELECT f.id, f.title, f.question, f.answer
@@ -49,9 +58,9 @@ SELECT f.id, f.title, f.question, f.answer
 	}
 	switch req.CardFilter {
 	case FilterBadOK:
-		q += ` AND f.last_result IN (0, 1)`
+		q += ` AND ` + badOkPredicate
 	case FilterDue:
-		q += ` AND f.due_at IS NOT NULL AND f.due_at <= now()`
+		q += ` AND ` + duePredicate
 	}
 	q += ` ORDER BY f.id`
 	return q

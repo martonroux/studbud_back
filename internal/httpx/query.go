@@ -21,6 +21,20 @@ func QueryInt64(r *http.Request, name string) (int64, error) {
 	return v, nil
 }
 
+// QueryOptionalInt64 reads an optional int64 query param by name.
+// Returns (nil, nil) when the param is missing, and ErrInvalidInput when present but unparseable.
+func QueryOptionalInt64(r *http.Request, name string) (*int64, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, myErrors.ErrInvalidInput
+	}
+	return &v, nil
+}
+
 // QueryIntDefault reads an optional int query param, falling back to def when
 // missing or unparseable.
 func QueryIntDefault(r *http.Request, name string, def int) int {

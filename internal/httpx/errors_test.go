@@ -64,3 +64,16 @@ func TestWriteError_ContentPolicy(t *testing.T) {
 		t.Errorf("code = %q, want content_policy", body.Error.Code)
 	}
 }
+
+func TestWriteError_EmptyCardPool(t *testing.T) {
+	rec := httptest.NewRecorder()
+	WriteError(rec, myErrors.ErrEmptyCardPool)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", rec.Code)
+	}
+	var body struct{ Error struct{ Code string } }
+	_ = json.NewDecoder(rec.Body).Decode(&body)
+	if body.Error.Code != "empty_card_pool" {
+		t.Errorf("code = %q, want empty_card_pool", body.Error.Code)
+	}
+}

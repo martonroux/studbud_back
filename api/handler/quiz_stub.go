@@ -115,6 +115,34 @@ func (h *QuizHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// CardCounts handles GET /quizzes/card-counts?subjectId=X[&chapterId=Y].
+// Used by quiz setup to preview pool sizes and disable filters with zero cards.
+func (h *QuizHandler) CardCounts(w http.ResponseWriter, r *http.Request) {
+	uid := authctx.UID(r.Context())
+	subjectID, err := httpx.QueryInt64(r, "subjectId")
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	chapterID, err := httpx.QueryOptionalInt64(r, "chapterId")
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	res, err := h.svc.CardCounts(r.Context(), quiz.CardCountsRequest{
+		UserID: uid, SubjectID: subjectID, ChapterID: chapterID,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	resp := map[string]any{"counts": res.Counts}
+	if chapterID == nil {
+		resp["chapters"] = res.Chapters
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
 // Start handles POST /quizzes/{id}/start.
 // Returns the existing in-progress attempt (idempotent) or creates a new one.
 func (h *QuizHandler) Start(w http.ResponseWriter, r *http.Request) {

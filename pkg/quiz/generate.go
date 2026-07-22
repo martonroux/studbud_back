@@ -24,6 +24,9 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 	if err != nil {
 		return GenerateResult{}, err
 	}
+	if req.Kind == KindSpecific && len(cards) == 0 {
+		return GenerateResult{}, myErrors.ErrEmptyCardPool
+	}
 	subjectName, err := s.lookupSubjectName(ctx, req.SubjectID, req.UserID)
 	if err != nil {
 		return GenerateResult{}, err

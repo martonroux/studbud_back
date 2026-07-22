@@ -1471,6 +1471,43 @@ paths:
 
   # ── Quiz (Spec D) ──────────────────────────────────────────────────────────
 
+  /quizzes/card-counts:
+    get:
+      tags: [Quiz]
+      summary: Preview flashcard pool sizes for quiz setup
+      description: |
+        Returns `{all, bad_ok, due}` counts for the requested subject (and
+        optional chapter), matching the exact pool semantics used by
+        `POST /quizzes/generate` (kind=specific). Used by quiz setup UI to
+        disable filters/chapters with zero eligible cards before generating.
+        `bad_ok` = `last_result IN (0,1)`; `due` = `due_at IS NOT NULL AND due_at <= now()`.
+      parameters:
+        - in: query
+          name: subjectId
+          required: true
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: chapterId
+          required: false
+          description: When set, scopes counts to one chapter and omits the `chapters` breakdown.
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Pool counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  counts: { $ref: '#/components/schemas/CardCounts' }
+                  chapters:
+                    type: array
+                    description: Present only when `chapterId` is omitted (subject scope).
+                    items: { $ref: '#/components/schemas/ChapterCardCounts' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /quizzes/generate:
     post:
       tags: [Quiz]
@@ -1504,6 +1541,14 @@ paths:
                   questionCount: { type: integer }
                   kind:          { type: string }
         '402': { $ref: '#/components/responses/PaymentRequired' }
+        '422':
+          description: |
+            kind=specific resolved zero flashcards for the requested subject/chapter/cardFilter
+            scope. Code: `empty_card_pool`. Use `GET /quizzes/card-counts` to check pool size
+            before calling generate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /quizzes/{id}/start:
@@ -2205,6 +2250,21 @@ components:
       properties:
         answered: { type: integer }
         total:    { type: integer }
+
+    CardCounts:
+      type: object
+      description: Pool sizes per filter; semantics match `pkg/quiz/pool.go`.
+      properties:
+        all:    { type: integer }
+        bad_ok: { type: integer }
+        due:    { type: integer }
+
+    ChapterCardCounts:
+      type: object
+      properties:
+        chapterId: { type: integer, format: int64 }
+        title:     { type: string }
+        counts:    { $ref: '#/components/schemas/CardCounts' }
 
     QuizAttempt:
       type: object

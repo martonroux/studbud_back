@@ -43,6 +43,7 @@ var sentinelStatus = []struct {
 	{myErrors.ErrContentPolicy, http.StatusUnprocessableEntity},
 	{myErrors.ErrNotImplemented, http.StatusNotImplemented},
 	{myErrors.ErrRateLimited, http.StatusTooManyRequests},
+	{myErrors.ErrEmptyCardPool, http.StatusUnprocessableEntity},
 }
 
 // sentinelCodes maps each sentinel error to its stable string code.
@@ -70,6 +71,7 @@ var sentinelCodes = []struct {
 	{myErrors.ErrContentPolicy, "content_policy"},
 	{myErrors.ErrNotImplemented, "not_implemented"},
 	{myErrors.ErrRateLimited, "rate_limited"},
+	{myErrors.ErrEmptyCardPool, "empty_card_pool"},
 }
 
 // WriteError writes a JSON error envelope with HTTP status mapped from the sentinel.

@@ -79,5 +79,24 @@ func TestGenerate_RejectsInvalidSize(t *testing.T) {
 	}
 }
 
+func TestGenerate_EmptyPool_Rejected(t *testing.T) {
+	pool := testutil.OpenTestDB(t)
+	testutil.Reset(t, pool)
+	u := testutil.NewVerifiedUser(t, pool)
+	testutil.GiveAIAccess(t, pool, u.ID)
+	sub := testutil.NewSubjectNamed(t, pool, u.ID, "Bio", "private")
+	// No flashcards seeded — pool resolves to zero cards.
+
+	svc := quiz.NewService(pool, nil) // AI must never be reached
+	_, err := svc.Generate(context.Background(), quiz.GenerateRequest{
+		UserID: u.ID, SubjectID: sub.ID, Kind: quiz.KindSpecific,
+		Size: 5, Types: []quiz.QuestionType{quiz.QTypeMultiChoice},
+		CardFilter: quiz.FilterAll,
+	})
+	if !errors.Is(err, myErrors.ErrEmptyCardPool) {
+		t.Fatalf("want ErrEmptyCardPool, got %v", err)
+	}
+}
+
 // itoa is a tiny helper used by the JSON fixture above.
 func itoa(i int64) string { return fmt.Sprintf("%d", i) }
