@@ -116,6 +116,23 @@ func CreateUser(ctx context.Context, input CreateUserInput) (*User, error) {
 - The code is its own documentation for structure — CLAUDE.md captures what is NOT visible in the code
 - A good CLAUDE.md should rarely need updating; if it changes every commit, it's too specific
 
+## API Endpoint Design (CRUCIAL)
+
+### Reuse Before Creating (CRUCIAL)
+
+- You MUST prioritize using existing endpoints when they can do the job efficiently — do NOT create a new endpoint for every interaction
+- Before adding any endpoint, check the existing routes: `cmd/app/routes.go` is the wired source of truth, `docs/API.md` is the catalog
+- Creating a new endpoint is allowed ONLY when:
+  1. No existing endpoint can perform the required task; or
+  2. Doing the task with existing endpoints would require multiple API calls — at that point a single dedicated endpoint is more efficient
+- If an existing endpoint almost fits, prefer extending it (e.g., an optional query parameter or field) over duplicating it — as long as it stays simple and backward compatible
+
+### Keep Endpoints Generic
+
+- Endpoints must stay generic for the most part — model them around resources and operations, not around one screen or one feature's exact needs
+- Avoid single-use endpoints that hardcode a specific client workflow; a new UI interaction is not, by itself, a reason for a new route
+- A small set of generic, composable endpoints is better than many narrow ones (same philosophy as Minimal Public API above)
+
 ## Git Commit Convention
 
 All commits in the StudBud repository follow this format:
